@@ -80,8 +80,6 @@ select, input { background: var(--surface); border: 1px solid var(--border); bor
 .hm-tip { position: absolute; white-space: nowrap; z-index: 40; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,.2); }
 #more { margin: 8px 0 24px; }
 #account-pick { margin-bottom: 12px; }
-.evidence { font-size: 13px; color: var(--muted); margin: -4px 0 12px; }
-.evidence ul { margin: 6px 0 0; padding-left: 18px; }
 .bill-rows tr.sub-head th { padding-top: 10px; font-size: 13px; color: var(--muted); font-weight: 600; }
 
 /* Bills header bar (EMT's period-nav): sticks to the top while the days scroll */

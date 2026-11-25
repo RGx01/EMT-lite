@@ -196,14 +196,9 @@ async function signInAndLoad(signIn) {
     if (my !== session) return;
     const info = describeAccount(number, acc);
     if (!info.import) throw new Error('No electricity import meter on this account.');
-    // What Octopus holds about billing, shown on the page; each is optional.
-    const [trigger, payments, recent] = await Promise.all([
-      o.billingTrigger(number).catch((e) => ({ error: e.message || 'error' })),
-      o.paymentSchedules(number).catch(() => []),
-      o.recentBills(number).catch(() => []),
-    ]);
+    // Kraken's billing trigger, if the account has one, is a source for the billing day (design §5.2).
+    const trigger = await o.billingTrigger(number).catch(() => null);
     if (my !== session) return;
-    info.evidence = { options: acc.billingOptions || null, trigger, payments, bills: recent };
     info.billing = chooseBilling({ userDay: remembered()?.billingDays?.[number] ?? null, info, trigger });
     $('who').textContent = number;
     busy(false);

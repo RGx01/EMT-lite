@@ -20,8 +20,8 @@ function median(xs) {
  *     day's rate only when the day charged a single rate (a flat tariff).
  *  4. Otherwise null: a gap in the line.
  */
-export function rateLine(dayKey, day, slots, published = null) {
-  const v = 1 + vatRate(dayKey);
+export function rateLine(dayKey, day, slots, published = null, vat = vatRate) {
+  const v = 1 + vat(dayKey);
   const out = new Map();
   const byBand = { true: [], false: [], all: [] };
   for (const slot of slots) {
@@ -73,8 +73,8 @@ export const inIogWindow = (slot) => slot >= 47 || slot <= 10;
  * the other side's. Not carried on from the half-hour before: after a dispatch ends, a house that
  * draws nothing is back at peak.
  */
-export function sideRateLine(dayKey, day, slots, side) {
-  const v = 1 + vatRate(dayKey);
+export function sideRateLine(dayKey, day, slots, side, vat = vatRate) {
+  const v = 1 + vat(dayKey);
   const other = side === 'ev' ? 'home' : 'ev';
   const raw = new Map();
   const byBand = { ev: { off: [], peak: [], other: [] }, home: { off: [], peak: [], other: [] } };

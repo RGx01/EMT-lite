@@ -49,7 +49,7 @@ exists now, so later commands need no `--force`.
 | `src/octopus.js` | the only code that talks to Octopus: token, account, measurements, Agile rates |
 | `src/data.js` | picks meters and the billing rule; loads months newest first |
 | `src/measurements.js` | Octopus measurement nodes → half-hours (pence, ex VAT) |
-| `src/time.js`, `src/vat.js` | UK local time; VAT by date |
+| `src/time.js`, `src/vat.js` | UK local time; VAT by date (domestic) or the business rate |
 | `src/periods.js`, `src/bill.js`, `src/rates.js` | period cutting, the bill card's arithmetic, the rate line |
 | `src/heatmap.js`, `src/bills.js`, `src/main.js` | the two views and the page |
 | `src/demo.js` | the demo account |

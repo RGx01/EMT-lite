@@ -599,3 +599,69 @@ describe('the heatmap\'s day bars', () => {
     expect(dayBarText(k, daySummary(none), false)).toBe('Tue 10 Nov 2026 · no readings · 48 import half-hours missing');
   });
 });
+
+import { accountVat, BUSINESS_VAT_DEFAULT } from '../src/data.js';
+import { addDays } from '../src/time.js';
+import { vatFor, statutoryRate } from '../src/vat.js';
+import { vatNote } from '../src/bills.js';
+
+describe('business VAT', () => {
+  const ag = (inc, exc, from = '2025-01-01T00:00:00Z', to = null) => ({ validFrom: from, validTo: to,
+    tariff: { standingCharge: inc, preVatStandingCharge: exc } });
+
+  it('a domestic account follows the calendar', () => {
+    const v = accountVat('DOMESTIC', [ag(60, 50)]);
+    expect(v).toEqual({ business: false, rate: null, source: 'calendar' });
+    expect(vatFor(v)('2026-09-30')).toBe(0.05);
+    expect(vatFor(v)('2026-10-01')).toBe(0);
+  });
+  it('a business account pays the rate its tariff carries, on every day', () => {
+    const v = accountVat('BUSINESS', [ag(60, 50)]);
+    expect(v).toEqual({ business: true, rate: 0.2, source: 'tariff' });
+    expect(vatFor(v)('2026-09-30')).toBe(0.2);
+    expect(vatFor(v)('2026-10-01')).toBe(0.2);
+  });
+  it('a business under the de minimis limit pays 5%, read through Octopus’s rounding', () => {
+    expect(accountVat('BUSINESS_OCCUPIER', [ag(25.2, 24.0)]).rate).toBe(0.05);
+    expect(accountVat('BUSINESS', [ag(41.9475, 39.95)]).rate).toBe(0.05);
+  });
+  it('the agreement in force now decides, not an older one', () => {
+    const now = Date.parse('2026-11-25T12:00:00Z');
+    const ags = [ag(52.5, 50, '2024-01-01T00:00:00Z', '2025-01-01T00:00:00Z'), ag(60, 50, '2025-01-01T00:00:00Z')];
+    expect(accountVat('BUSINESS', ags, now).rate).toBe(0.2);
+  });
+  it('a business tariff that shows no VAT falls back to the standard rate', () => {
+    expect(accountVat('BUSINESS', [ag(null, null)])).toEqual({ business: true, rate: BUSINESS_VAT_DEFAULT, source: 'default' });
+    expect(accountVat('BUSINESS', [ag(57, 50)]).source).toBe('default');   // 14%: not a UK rate
+    expect(statutoryRate(0.195)).toBe(0.2);
+    expect(statutoryRate(0.14)).toBe(null);
+  });
+  it('describeAccount reads the account type', () => {
+    const acc = (type) => ({ accountType: type, properties: [{ electricityMeterPoints: [
+      { mpan: '2600000000001', direction: 'IMPORT', agreements: [ag(60, 50)] }] }] });
+    expect(describeAccount('A-0000ABC7', acc('BUSINESS')).vat.rate).toBe(0.2);
+    expect(describeAccount('A-0000ABC7', acc('DOMESTIC')).vat.business).toBe(false);
+  });
+  it('the bill adds a business account’s VAT after 1 Oct 2026, where the domestic calendar adds none', () => {
+    const k = '2026-10-10';
+    const days = byDay([{ start: midnight(k), kwh: 2, costExc: 50, standingExc: 40, offPeak: null, split: null }]);
+    const cover = { from: '2026-01-01', last: midnight('2026-10-11'), now: midnight('2026-10-12') };
+    const period = { start: k, end: addDays(k, 1) };
+    const biz = summarise(period, days, cover, null, null, vatFor(accountVat('BUSINESS', [ag(60, 50)])));
+    const dom = summarise(period, days, cover, null, null);
+    expect(dom.energy).toBeCloseTo(50);
+    expect(biz.energy).toBeCloseTo(60);
+    expect(biz.standing).toBeCloseTo(48);
+  });
+  it('the rate line includes a business account’s VAT', () => {
+    const k = '2026-10-10';
+    const day = byDay([{ start: midnight(k), kwh: 2, costExc: 50, standingExc: 40, offPeak: null, split: null }]).get(k);
+    expect(rateLine(k, day, [0], null, vatFor({ business: true, rate: 0.2 })).get(0)).toBeCloseTo(30);
+    expect(rateLine(k, day, [0], null).get(0)).toBeCloseTo(25);
+  });
+  it('the bill card says which VAT it added', () => {
+    expect(vatNote({ business: false })).toMatch(/domestic rate/);
+    expect(vatNote({ business: true, rate: 0.2, source: 'tariff' })).toMatch(/VAT at 20% .*business account, at the rate your tariff carries/);
+    expect(vatNote({ business: true, rate: 0.2, source: 'default' })).toMatch(/standard rate/);
+  });
+});
