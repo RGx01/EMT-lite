@@ -4,8 +4,8 @@
 // The API key is used once, for obtainKrakenToken, and is not kept: the page holds the token
 // (about an hour) and the refresh token. No mutation other than obtainKrakenToken is ever sent.
 
-import { TOKEN_MUTATION, ACCOUNT_NUMBERS, ACCOUNT_INFO, BILLING_TRIGGER, measurementsQuery } from './queries.js';
-import { parseNode } from './measurements.js';
+import { TOKEN_MUTATION, ACCOUNT_NUMBERS, ACCOUNT_INFO, BILLING_TRIGGER, measurementsQuery, GAS_MEASUREMENTS } from './queries.js';
+import { parseNode, parseGasNode } from './measurements.js';
 import { isoLocal, midnight, addDays, addMonths, parseKey, noon } from './time.js';
 
 const GQL = 'https://api.octopus.energy/v1/graphql/';
@@ -182,23 +182,29 @@ export class Octopus {
    *  without costs (design §5.3). */
   async measurementsBetween(number, mpan, startMs, endMs, direction = 'CONSUMPTION') {
     const dir = direction === 'GENERATION' ? 'GENERATION' : 'CONSUMPTION';
-    const q = measurementsQuery(dir);
+    return this._paged(measurementsQuery(dir), { n: number, mpan, start: isoLocal(startMs), end: isoLocal(endMs) }, parseNode);
+  }
+
+  /** Half-hourly gas readings for [fromKey, toKey) local days (the gas heatmap; no costs). */
+  async gasMeasurements(number, mprn, fromKey, toKey) {
+    return this._paged(GAS_MEASUREMENTS, { n: number, mprn, start: isoLocal(midnight(fromKey)), end: isoLocal(midnight(toKey)) }, parseGasNode);
+  }
+
+  /** Every page of a measurements connection, 500 rows a page, each node through `parse`. */
+  async _paged(q, vars, parse) {
     const out = [];
     let after = null;
     for (let page = 0; page < 200; page++) {
-      const d = await this.gql(q, {
-        n: number, mpan, start: isoLocal(startMs), end: isoLocal(endMs), first: 500, after,
-      });
+      const d = await this.gql(q, { ...vars, first: 500, after });
       const conn = (d.account?.properties || []).map((p) => p.measurements).find((m) => m && (m.edges || m.pageInfo));
       if (!conn) break;
       for (const e of conn.edges || []) {
-        const iv = parseNode(e.node);
+        const iv = parse(e.node);
         if (iv) out.push(iv);
       }
       if (!conn.pageInfo?.hasNextPage || !conn.pageInfo.endCursor) break;
       after = conn.pageInfo.endCursor;
     }
-
     return out;
   }
 

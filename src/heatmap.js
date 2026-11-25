@@ -116,29 +116,30 @@ export function daySummary(cells) {
   return d;
 }
 
-/** The tooltip on a day's net bar. */
-export function dayBarText(k, d, withExport) {
+/** The tooltip on a day's net bar. `unit` and `what` name the readings: kWh and import for
+ *  electricity, the gas meter's unit and gas for gas. */
+export function dayBarText(k, d, withExport, unit = 'kWh', what = 'import') {
   const { y, m, d: dd } = parseKey(k);
   const dow = DOW[new Date(Date.UTC(y, m - 1, dd)).getUTCDay()];
   const bits = [`${dow} ${dd} ${SHORT_MON[m - 1]} ${y}`];
   if (d.net == null) bits.push('no readings');
   else {
-    bits.push(withExport ? `net ${d.net.toFixed(2)} kWh` : `${d.net.toFixed(2)} kWh`);
+    bits.push(withExport ? `net ${d.net.toFixed(2)} ${unit}` : `${d.net.toFixed(2)} ${unit}`);
     if (withExport) bits.push(`import ${d.imp.toFixed(2)} kWh`, `export ${d.exp.toFixed(2)} kWh`);
   }
   const miss = [];
-  if (d.missImp) miss.push(`${d.missImp} import`);
+  if (d.missImp) miss.push(`${d.missImp} ${what}`);
   if (withExport && d.missExp) miss.push(`${d.missExp} export`);
   if (miss.length) bits.push(`${miss.join(', ')} half-hour${d.missImp + (withExport ? d.missExp : 0) === 1 ? '' : 's'} missing`);
   return bits.join(' · ');
 }
 
 const fmtSlot = (s) => `${String(Math.floor(s / 2)).padStart(2, '0')}:${s % 2 ? '30' : '00'}`;
-const kwh = (v) => `${v.toFixed(3)} kWh`;
 
 /** Draw `months` (oldest first, [{start,end}]) into `root`. */
-export function renderHeatmap(root, { months, imp, impCover, exp, expCover }) {
+export function renderHeatmap(root, { months, imp, impCover, exp, expCover, unit = 'kWh', what = 'import' }) {
   root.replaceChildren();
+  const kwh = (v) => `${v.toFixed(3)} ${unit}`;
   const grids = months.map((month) => {
     const rows = daysBetween(month.start, month.end).map((k) => {
       const exists = slotsOfDay(k);
@@ -164,7 +165,7 @@ export function renderHeatmap(root, { months, imp, impCover, exp, expCover }) {
     }
   }
   const stops = kwhStops(mn, mx, bg());
-  root.append(legend(stops, mn, mx, !!exp));
+  root.append(legend(stops, mn, mx, !!exp, unit));
 
   const tip = document.createElement('div');
   tip.className = 'hm-tip';
@@ -205,13 +206,13 @@ export function renderHeatmap(root, { months, imp, impCover, exp, expCover }) {
     const totX = LEFT + 48 * (CELL + GAP) + PAD;
     const zeroX = anyNeg ? totX + TOTAL_W / 2 : totX;
     const barScale = maxAbsDay > 0 ? (anyNeg ? TOTAL_W / 2 : TOTAL_W) / maxAbsDay : 0;
-    ctx.fillText('Net kWh/day', totX, TOP - 8);
+    ctx.fillText(exp || unit === 'kWh' && what === 'import' ? `Net ${unit}/day` : `${unit}/day`, totX, TOP - 8);
 
     let missImp = 0, missExp = 0;
     const hit = [], bars = [];
     rows.forEach((r, row) => {
       const yy = TOP + row * (CELL + GAP);
-      bars.push({ y: yy, text: dayBarText(r.k, daySummary(r.cells), !!exp) });
+      bars.push({ y: yy, text: dayBarText(r.k, daySummary(r.cells), !!exp, unit, what) });
       const dow = new Date(`${r.k}T12:00:00Z`).getUTCDay();
       const weekend = dow === 0 || dow === 6;
       ctx.fillStyle = weekend ? (dark() ? '#e8eaf0' : '#1d2130') : axis();
@@ -246,7 +247,7 @@ export function renderHeatmap(root, { months, imp, impCover, exp, expCover }) {
       ctx.fillRect(zeroX, TOP - 2, 1, rows.length * (CELL + GAP));
     }
     const parts = [];
-    if (missImp) parts.push(`${missImp} import`);
+    if (missImp) parts.push(`${missImp} ${what}`);
     if (missExp) parts.push(`${missExp} export`);
     note.textContent = parts.length ? `${parts.join(', ')} half-hour${missImp + missExp === 1 ? '' : 's'} missing` : '';
 
@@ -271,7 +272,7 @@ export function renderHeatmap(root, { months, imp, impCover, exp, expCover }) {
       const { c } = q;
       const say = (st, v) => (st === 'present' ? kwh(v) : st === 'partial' ? `${kwh(v)}, one of the hour's two readings missing (clocks back)` : st === 'missing' ? 'missing' : st === 'pending' ? 'not in yet'
         : st === 'outside' ? 'before supply' : st === 'future' ? '—' : '');
-      const bits = [`${q.k} ${fmtSlot(q.s)}`, `import ${say(c.impSt, c.imp)}`];
+      const bits = [`${q.k} ${fmtSlot(q.s)}`, `${what} ${say(c.impSt, c.imp)}`];
       if (exp) bits.push(`export ${say(c.expSt, c.exp)}`);
       if (c.value != null && exp) bits.push(`net ${kwh(c.value)}`);
       show(bits.join(' · '));
@@ -280,7 +281,7 @@ export function renderHeatmap(root, { months, imp, impCover, exp, expCover }) {
   }
 }
 
-function legend(stops, mn, mx, withExport) {
+function legend(stops, mn, mx, withExport, unit = 'kWh') {
   const el = document.createElement('div');
   el.className = 'hm-legend';
   const bar = document.createElement('canvas');
@@ -288,7 +289,7 @@ function legend(stops, mn, mx, withExport) {
   const x = bar.getContext('2d');
   for (let i = 0; i < 200; i++) { x.fillStyle = paint(stops, 0, 199, i); x.fillRect(i, 0, 1, 12); }
   const span = (text, cls) => { const s = document.createElement('span'); s.textContent = text; if (cls) s.className = cls; return s; };
-  el.append(span(`${mn.toFixed(2)} kWh`), bar, span(`${mx.toFixed(2)} kWh${withExport ? ' (import − export)' : ''}`));
+  el.append(span(`${mn.toFixed(2)} ${unit}`), bar, span(`${mx.toFixed(2)} ${unit}${withExport ? ' (import − export)' : ''}`));
   el.append(span('', 'hm-swatch bw'), span(withExport ? 'no import or export reading' : 'no reading from Octopus'));
   if (withExport) {
     el.append(span('', 'hm-swatch green'), span('export missing (/)'));
