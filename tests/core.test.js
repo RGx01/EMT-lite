@@ -699,3 +699,63 @@ describe('the Kraken schema check', () => {
     }
   });
 });
+
+import { billMethod, penny, vatLabel } from '../src/bill.js';
+
+describe('Bill Rounding (EMT’s bill method)', () => {
+  const cover = { from: '2026-01-01', last: midnight('2026-10-03'), now: midnight('2026-10-04') };
+  // 3 half-hours a day, each 0.3335p ex VAT, standing 16.0001p ex VAT per half-hour... keep it simple:
+  // a day's energy is 3 × 0.3335 = 1.0005p, which a bill rounds ONCE (1p), not per half-hour (3 × 0p).
+  const ivs = (k) => [0, 1, 2].map((i) => ({ start: midnight(k) + i * HALF_HOUR, kwh: 0.1, costExc: 0.3335,
+    standingExc: i === 0 ? 48.0004 : 0, offPeak: false, split: null }));
+
+  it('sums every half-hour unrounded and rounds each line once', () => {
+    const imp = byDay([...ivs('2026-09-29'), ...ivs('2026-09-30')]);
+    const s = summarise({ start: '2026-09-29', end: '2026-10-01' }, imp, cover);
+    const b = s.bill;
+    expect(b.energyExc).toBe(2);                      // 6 × 0.3335 = 2.001 → 2p
+    expect(b.standingExc).toBe(96);                   // 2 × 48.0004 = 96.0008 → 96p
+    expect(b.standing).toEqual([{ days: 2, rateExc: 48.0004, exc: 96 }]);
+    expect(b.subtotalExc).toBe(98);
+    expect(b.vat).toBe(5);                            // 98.0018 × 5% = 4.90009 → 5p
+    expect(b.incTotal).toBe(103);                     // 102.9019 → 103p
+    expect(b.total).toBe(103);
+    expect(b.vatLabel).toBe('VAT @ 5%');
+  });
+  it('the total is Total incl. VAT less the export credit as printed', () => {
+    const imp = byDay(ivs('2026-09-30'));
+    const exp = byDay([{ start: midnight('2026-09-30') + 24 * HALF_HOUR, kwh: 1.3, costExc: 19.4949, standingExc: null, offPeak: false }]);
+    const s = summarise({ start: '2026-09-30', end: '2026-10-01' }, imp, cover, exp, cover);
+    expect(s.bill.exportCredit).toBe(19);
+    expect(s.bill.total).toBe(s.bill.incTotal - 19);
+  });
+  it('names each VAT rate in force when a period spans a change', () => {
+    const imp = byDay([...ivs('2026-09-30'), ...ivs('2026-10-01')]);
+    const s = summarise({ start: '2026-09-30', end: '2026-10-02' }, imp, cover);
+    expect(s.bill.vatLabel).toBe('VAT @ 5% to 30 Sep, 0% from 1 Oct');
+    // VAT only on 30 Sep: (1.0005 + 48.0004) × 5% = 2.45 → 2p; the ex-VAT standing rate is one line
+    expect(s.bill.vat).toBe(2);
+    expect(s.bill.standing).toHaveLength(1);
+    expect(vatLabel({ '2026-11-01': 0, '2026-11-02': 0 })).toBe('VAT @ 0%');
+  });
+  it('a change in the daily standing charge is its own line', () => {
+    const a = ivs('2026-09-28'), b = ivs('2026-09-29').map((iv) => ({ ...iv, standingExc: iv.standingExc ? 50 : 0 }));
+    const s = summarise({ start: '2026-09-28', end: '2026-09-30' }, byDay([...a, ...b]), cover);
+    expect(s.bill.standing.map((g) => [g.days, g.exc])).toEqual([[1, 48], [1, 50]]);
+  });
+  it('rounds half a penny to even, as Python’s round does', () => {
+    expect([penny(266.5), penny(267.5), penny(266.4999), penny(266.5001), penny(-2.5)]).toEqual([266, 268, 266, 267, -2]);
+  });
+  it('billMethod is a pure function of the unrounded sums', () => {
+    const b = billMethod({ energy: 100.6, standing: 0, energyExc: 100.6, standingDays: {}, vatByDay: {}, exportCredit: 0 });
+    expect(b.incTotal).toBe(101);
+    expect(b.vatLabel).toBe('VAT @ 0%');
+  });
+});
+
+import { pounds } from '../src/bill.js';
+describe('pounds', () => {
+  it('puts a credit’s minus before the pound sign', () => {
+    expect([pounds(-567), pounds(1234), pounds(0), pounds(-0.001)]).toEqual(['−£5.67', '£12.34', '£0.00', '£0.00']);
+  });
+});
