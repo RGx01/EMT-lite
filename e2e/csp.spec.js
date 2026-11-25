@@ -40,11 +40,11 @@ test('the demo runs with no CSP violation, no error, and no request to another h
   await expect(page.locator('#status')).toContainText('Up to date', { timeout: 30_000 });
   await expect(page.locator('.bill-card')).toBeVisible();
   await page.locator('.day canvas').first().scrollIntoViewIfNeeded();
-  await page.getByRole('button', { name: 'Heatmap' }).click();
+  await page.getByRole('button', { name: 'Electric Heatmap' }).click();
   await expect(page.locator('.hm-month canvas').first()).toBeVisible();
   await page.locator('.hm-month canvas').first().hover();
   // the demo has a gas meter: its heatmap too
-  await page.getByRole('button', { name: 'Gas' }).click();
+  await page.getByRole('button', { name: 'Gas Heatmap' }).click();
   await expect(page.locator('.hm-legend')).toContainText('kWh');
   await page.locator('.hm-month canvas').first().hover();
 

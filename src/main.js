@@ -31,18 +31,11 @@ function showError(msg) {
 
 function status(msg) { $('status').textContent = msg || ''; }
 
-let fuel = 'elec';                     // the heatmap's meter: 'elec' or 'gas'
-function setFuel(f) {
-  fuel = f;
-  for (const b of document.querySelectorAll('#fuel .tab')) b.classList.toggle('active', b.dataset.fuel === f);
-  redraw();
-}
-
 function setTab(t) {
   tab = t;
   for (const b of document.querySelectorAll('#tabs .tab')) b.classList.toggle('active', b.dataset.tab === t);
   $('view-bills').hidden = t !== 'bills';
-  $('view-heatmap').hidden = t !== 'heatmap';
+  $('view-heatmap').hidden = t !== 'heatmap' && t !== 'gas';   // both heatmaps draw in one place
   redraw();
 }
 
@@ -55,8 +48,7 @@ function redraw() {
     if (!data) return;
     if (tab === 'bills') bills.render();
     else {
-      $('fuel').hidden = !data.info.gas;
-      if (fuel === 'gas' && data.info.gas) {
+      if (tab === 'gas' && data.info.gas) {
         // gas: its half-hours only, no export and no bill (design §1)
         renderHeatmap($('heatmap'), {
           months: data.shownMonths().reverse(),
@@ -98,9 +90,8 @@ async function signOut() {
 
 /** Back to the sign-in page, keeping what this device remembers (after an error). */
 function resetPage() {
-  fuel = 'elec';
-  $('fuel').hidden = true;
-  for (const b of document.querySelectorAll('#fuel .tab')) b.classList.toggle('active', b.dataset.fuel === 'elec');
+  $('tab-gas').hidden = true;
+  if (tab === 'gas') setTab('bills');
   octo?.signOut?.();
   bills?.destroyCharts();
   octo = data = bills = null;
@@ -142,6 +133,7 @@ async function start(o, info) {
   // the device cache only when the user asked to be remembered, and never for the demo
   const cache = keep && info.number !== DEMO_NUMBER ? deviceCache() : null;
   data = new AccountData(o, info, cache);
+  $('tab-gas').hidden = !info.gas;            // Gas Heatmap only for an account with a gas meter
   bills = new BillsView($('view-bills'), data, {
     // A day the user chooses holds for this visit, and is remembered with the account when the
     // browser is remembering it (design §4.4).
@@ -258,7 +250,6 @@ $('more').addEventListener('click', () => {
   loadMonths(monthsToLoad(monthsWanted));
 });
 for (const b of document.querySelectorAll('#tabs .tab')) b.addEventListener('click', () => setTab(b.dataset.tab));
-for (const b of document.querySelectorAll('#fuel .tab')) b.addEventListener('click', () => setFuel(b.dataset.fuel));
 window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', redraw);
 
 // A remembered device signs in with its refresh token.

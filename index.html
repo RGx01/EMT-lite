@@ -16,8 +16,9 @@
     <p class="promo">Got Home Assistant? Try <a href="https://github.com/RGx01/EMT" target="_blank" rel="noopener noreferrer"><strong>EMT</strong></a> for a richer experience
       <a class="ha-badge" href="https://my.home-assistant.io/redirect/supervisor_add_addon_repository/?repository_url=https%3A%2F%2Fgithub.com%2FRGx01%2FEMT" target="_blank" rel="noopener noreferrer"><img src="https://my.home-assistant.io/badges/supervisor_add_addon_repository.svg" alt="Add app repository to My Home Assistant" referrerpolicy="no-referrer"></a></p>
     <nav id="tabs" hidden>
-      <button type="button" data-tab="bills" class="tab active">Bills</button>
-      <button type="button" data-tab="heatmap" class="tab">Heatmap</button>
+      <button type="button" data-tab="bills" class="tab active">Electric Bills</button>
+      <button type="button" data-tab="heatmap" class="tab">Electric Heatmap</button>
+      <button type="button" data-tab="gas" class="tab" id="tab-gas" hidden>Gas Heatmap</button>
     </nav>
     <button type="button" id="forget" class="link" hidden>Sign out</button>
   </header>
@@ -54,10 +55,6 @@
       <div id="account-pick" hidden></div>
       <div id="view-bills"></div>
       <div id="view-heatmap" hidden>
-        <nav id="fuel" class="fuel" hidden aria-label="Which meter">
-          <button type="button" data-fuel="elec" class="tab active">Electricity</button>
-          <button type="button" data-fuel="gas" class="tab">Gas</button>
-        </nav>
         <div id="heatmap"></div>
       </div>
       <button type="button" id="more" hidden>Load 12 more months</button>

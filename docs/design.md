@@ -37,7 +37,7 @@ A web page for an Octopus customer **without Home Assistant**. They paste their 
    - It is not billed. It has the same grid, in the unit Octopus reports gas in (m³ or kWh, shown
      as given, not converted).
    - It has the same hatching for half-hours with no reading, and its own day bars.
-   - The heatmap switches between Electricity and Gas.
+   - It has its own header tab, **Gas Heatmap**, shown only when the account has gas.
    - Gas is fetched in the same 10-day windows as electricity, with `gasFilters`
      (`src/queries.js`), and cached with each month. A month cached before gas was loaded fetches
      its gas once, not its electricity again.
@@ -47,7 +47,7 @@ A web page for an Octopus customer **without Home Assistant**. They paste their 
    charts stack each bucket as its own bar, with a solid rate line for the House and one for the
    EV (§5.5).
 
-**Around the page.** The page's own header bar (EMT-Lite, the account, Bills / Heatmap, Sign out)
+**Around the page.** The page's own header bar (EMT-Lite, the account, Electric Bills / Electric Heatmap / Gas Heatmap, Sign out)
 stays at the top on every view; the bills' bar sticks just under it. On a wide screen the header
 bar also says *Got Home Assistant? Try EMT for a richer experience*, linking EMT on GitHub, with
 Home Assistant's own *Add app repository to My* badge linking to its add-repository page for EMT. The footer bar, always in view at the bottom of

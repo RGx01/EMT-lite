@@ -77,7 +77,6 @@ select, input { background: var(--surface); border: 1px solid var(--border); bor
 .hm-swatch.bw { background: #000 repeating-linear-gradient(135deg, #fff 0 1.2px, transparent 1.2px 4px); }
 .hm-swatch.green { background: #ffcc99 repeating-linear-gradient(135deg, #00c853 0 1.6px, transparent 1.6px 4px); }
 .hm-swatch.red { background: #66bb88 repeating-linear-gradient(45deg, #ff1744 0 1.6px, transparent 1.6px 4px); }
-.fuel { display: flex; gap: 4px; margin-bottom: 12px; }
 .hm-month { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; overflow-x: auto; }
 .hm-month h3 { margin: 0 0 4px; font-size: 15px; }
 .hm-note { font-size: 12px; font-weight: 400; color: var(--warn); }
