@@ -16,11 +16,16 @@ function median(xs) {
  *
  *  1. kWh and a cost: costExc ÷ kWh.
  *  2. Otherwise a published rate for the slot (Agile).
- *  3. Otherwise the day's charged rate for the same Octopus band; a slot with no band takes the
- *     day's rate only when the day charged a single rate (a flat tariff).
- *  4. Otherwise null: a gap in the line.
+ *  3. Otherwise the day's charged rate for the same Octopus band. A half-hour with no band (no
+ *     import, so nothing carried a charge) takes:
+ *       - on a tariff with a fixed off-peak window (`offWindow`, slot → bool: Intelligent's
+ *         23:30–05:30), that day's off-peak rate inside the window and its peak rate outside.
+ *         After a dispatch ends, a half-hour that drew nothing is back at peak, not the
+ *         off-peak rate carried on (the IOG-SMB House line's rule, sideRateLine).
+ *       - otherwise the day's rate only when the day charged a single rate (a flat tariff).
+ *  4. Otherwise null: a gap in the line (solid() carries the rate before it on).
  */
-export function rateLine(dayKey, day, slots, published = null, vat = vatRate) {
+export function rateLine(dayKey, day, slots, published = null, vat = vatRate, offWindow = null) {
   const v = 1 + vat(dayKey);
   const out = new Map();
   const byBand = { true: [], false: [], all: [] };
@@ -41,6 +46,7 @@ export function rateLine(dayKey, day, slots, published = null, vat = vatRate) {
     const iv = day?.get(slot);
     let r = null;
     if (iv && (iv.offPeak === true || iv.offPeak === false)) r = median(byBand[iv.offPeak]);
+    else if (offWindow) r = median(byBand[offWindow(slot) ? true : false]) ?? (distinct.size === 1 ? byBand.all[0] : null);
     else if (distinct.size === 1) r = byBand.all[0];
     out.set(slot, r == null ? null : r * v);
   }
@@ -64,6 +70,12 @@ export function solid(rates, slots) {
 
 // Intelligent Octopus's fixed off-peak window, 23:30–05:30 local: slots 47 and 0–10.
 export const inIogWindow = (slot) => slot >= 47 || slot <= 10;
+
+/** A tariff's fixed off-peak window as slot → bool, or null when it has none EMT-Lite knows.
+ *  Intelligent Octopus (product codes with INTELLI, IOG and IOG-SMB alike): 23:30–05:30. */
+export function offWindowOf(tariff) {
+  return /INTELLI/i.test(String(tariff?.productCode || '')) ? inIogWindow : null;
+}
 
 /**
  * The rate one side of Octopus's IOG-SMB split was charged (design §5.5), p/kWh with VAT:

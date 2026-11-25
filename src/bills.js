@@ -6,9 +6,9 @@ import {
   LinearScale, CategoryScale, Tooltip, Legend,
 } from 'chart.js';
 import { billPeriods, calendarPeriods, previousOf, lastYearOf, periodLabel } from './periods.js';
-import { summarise, pounds } from './bill.js';
+import { summarise, pounds, penny } from './bill.js';
 import { vatFor } from './vat.js';
-import { rateLine, solid, sideRateLine, exportRateLine } from './rates.js';
+import { rateLine, solid, sideRateLine, exportRateLine, offWindowOf } from './rates.js';
 import { daysBetween, slotsOfDay, todayKey, parseKey, addDays } from './time.js';
 
 Chart.register(BarController, BarElement, LineController, LineElement, PointElement, LinearScale, CategoryScale, Tooltip, Legend);
@@ -57,6 +57,17 @@ export function vatNote(vat) {
   return vat.source === 'tariff'
     ? `VAT at ${pct} added to Octopus’s ex-VAT costs: a business account, at the rate your tariff carries.`
     : `VAT at ${pct} added to Octopus’s ex-VAT costs: a business account, at the standard rate (your tariff does not show its VAT).`;
+}
+
+export const ISSUES_URL = 'https://github.com/RGx01/EMT-lite/issues/new/choose';
+
+/** The bill card's last note: these figures are worked out, not Octopus's bill. */
+function caveat() {
+  const li = el('li', 'caveat', 'Worked out from Octopus’s half-hourly data: not your bill, and it may contain mistakes. Your Octopus statement is the one that counts. Something wrong? ');
+  const a = el('a', null, 'Raise an issue');
+  a.href = ISSUES_URL; a.target = '_blank'; a.rel = 'noopener noreferrer';
+  li.append(a, '.');
+  return li;
 }
 
 function el(tag, cls, text) {
@@ -183,7 +194,7 @@ export class BillsView {
     this.root.append(card);
     this.root.append(this.days(p));
 
-    stripLabel.textContent = `Bill — ${periodLabel(p, this.mode)} | ${pounds(s.net)}${s.finished ? '' : ' so far'}`;
+    stripLabel.textContent = `Bill — ${periodLabel(p, this.mode)} | ${pounds(s.bill.total)}${s.finished ? '' : ' so far'}`;
     showBill.addEventListener('click', () => card.scrollIntoView({ behavior: 'smooth', block: 'start' }));
     this.stripObserver?.disconnect();
     this.stripObserver = new IntersectionObserver(([e]) => {
@@ -254,8 +265,10 @@ export class BillsView {
     wrap.append(t);
     // the day header's £ is energy and standing charge together: say so under the table
     const sd = summarise({ start: k, end: addDays(k, 1) }, this.data.impDays, this.data.impCover, this.data.expDays, this.data.expCover, this.vat);
-    wrap.append(el('p', 'day-data-note', `Standing charge ${pounds(sd.standing)} · day total ${pounds(sd.total)}`
-      + `${sd.exportCredit ? ` · after export ${pounds(sd.net)}` : ''} · £ include VAT on import, none on export.`));
+    const b = sd.bill;
+    wrap.append(el('p', 'day-data-note', `Standing charge ${pounds(b.standingExc)} exc VAT · ${b.vatLabel} ${pounds(b.vat)}`
+      + ` · day total incl. VAT ${pounds(b.incTotal)}${b.exportCredit ? ` · after export ${pounds(b.total)}` : ''}`
+      + ' · the rows’ £ include VAT on import, none on export; the totals are rounded once, as on a bill.'));
     return wrap;
   }
 
@@ -292,12 +305,12 @@ export class BillsView {
     const card = el('section', 'bill-card');
     card.append(el('h2', null, periodLabel(p, this.mode)));
     const big = el('div', 'bill-total');
-    big.append(el('span', 'amount', pounds(s.net)), el('span', 'muted', s.exportKwh ? ' after export' : ' total'));
+    big.append(el('span', 'amount', pounds(s.bill.total)), el('span', 'muted', s.exportKwh ? ' after export' : ' total'));
     card.append(big);
     const cmp = el('div', 'bill-cmp');
     const delta = (o, lab) => {
       if (!o || o.kwh === 0) return;
-      const dv = s.net - o.net;
+      const dv = s.bill.total - o.bill.total;
       cmp.append(el('span', dv > 0 ? 'up' : 'down', `${dv > 0 ? '▲' : '▼'} ${pounds(Math.abs(dv))} vs ${lab}`));
     };
     if (s.finished) {
@@ -314,29 +327,45 @@ export class BillsView {
       tr.append(el('th', null, a), el('td', null, b), el('td', 'num', c));
       t.append(tr);
     };
+    // The bill's lines, ex VAT, as Octopus prints them (EMT's Bill Rounding, bill.js billMethod):
+    // each half-hour summed unrounded, each line rounded once.
+    const b = s.bill;
     const kwh = (v) => `${v.toFixed(1)} kWh`;
-    const rate = (b) => (b.kwh > 0 ? ` @ ${(b.cost / b.kwh).toFixed(2)}p` : '');
-    if (s.offPeak.kwh) row('Off-peak', kwh(s.offPeak.kwh) + rate(s.offPeak), pounds(s.offPeak.cost));
-    if (s.peak.kwh) row('Peak', kwh(s.peak.kwh) + rate(s.peak), pounds(s.peak.cost));
-    if (s.unbanded.kwh) row('Energy', kwh(s.unbanded.kwh) + rate(s.unbanded), pounds(s.unbanded.cost));
-    if (s.split) {
+    const rate = (e) => (e.kwh > 0 ? ` @ ${(e.exc / e.kwh).toFixed(2)}p` : '');
+    const exc = (e) => pounds(penny(e.exc));
+    const sub = (text) => {
       const head = el('tr', 'sub-head');
-      const th = el('th', null, 'Octopus’s House / EV split');
+      const th = el('th', null, text);
       th.colSpan = 3;
       head.append(th);
       t.append(head);
+    };
+    sub('Energy, exc VAT');
+    if (s.offPeak.kwh) row('Off-peak', kwh(s.offPeak.kwh) + rate(s.offPeak), exc(s.offPeak));
+    if (s.peak.kwh) row('Peak', kwh(s.peak.kwh) + rate(s.peak), exc(s.peak));
+    if (s.unbanded.kwh) row('Energy', kwh(s.unbanded.kwh) + rate(s.unbanded), exc(s.unbanded));
+    if (s.split) {
+      sub('Octopus’s House / EV split, exc VAT');
       const NAMES = { ev: 'EV', home: 'House' }, BANDS = { off: 'off-peak', peak: 'peak', other: '' };
       for (const band of ['off', 'peak', 'other']) {
         for (const side of ['ev', 'home']) {
           const e = s.split[`${side}:${band}`];
-          if (!e || (e.kwh < 0.0005 && Math.abs(e.cost) < 0.005)) continue;
-          row(`${NAMES[side]} ${BANDS[band]}`.trim(), kwh(e.kwh) + rate(e), pounds(e.cost));
+          if (!e || (e.kwh < 0.0005 && Math.abs(e.exc) < 0.005)) continue;
+          row(`${NAMES[side]} ${BANDS[band]}`.trim(), kwh(e.kwh) + rate(e), exc(e));
         }
       }
     }
-    row('Standing charge', `${s.days} day${s.days === 1 ? '' : 's'}${s.finished ? '' : ' so far'}`, pounds(s.standing));
-    row('Import total', kwh(s.kwh), pounds(s.total), 'total');
-    if (s.exportKwh) row('Export', kwh(s.exportKwh), `−${pounds(s.exportCredit)}`);
+    row('Energy total', kwh(s.kwh), pounds(b.energyExc), 'total');
+    const soFar = s.finished ? '' : ' so far';
+    if (b.standing.length) {
+      for (const g of b.standing) row('Standing charge', `${g.days} day${g.days === 1 ? '' : 's'} @ ${g.rateExc.toFixed(2)}p${soFar}`, pounds(g.exc));
+    } else {
+      row('Standing charge', `${s.days} day${s.days === 1 ? '' : 's'}${soFar}`, pounds(0));
+    }
+    row(b.vatLabel, '', pounds(b.vat));
+    row('Total incl. VAT', '', pounds(b.incTotal), 'total');
+    if (s.exportKwh) row('Export', kwh(s.exportKwh), `−${pounds(b.exportCredit)}`);
+    if (s.exportKwh) row('Bill after export', '', pounds(b.total), 'total');
     card.append(t);
 
     const notes = el('ul', 'bill-notes');
@@ -346,6 +375,7 @@ export class BillsView {
     if (s.split) notes.append(el('li', 'muted', 'Octopus can revise its House/EV split for some days after it first appears.'));
     if (s.pending) notes.append(el('li', 'muted', `${s.pending} half-hour${s.pending === 1 ? '' : 's'} not in from Octopus yet.`));
     notes.append(el('li', 'muted', vatNote(this.data.info.vat)));
+    notes.append(caveat());
     card.append(notes);
     return card;
   }
@@ -371,7 +401,7 @@ export class BillsView {
       const head = el('div', 'day-head');
       head.append(
         el('strong', null, `${DOW[new Date(`${k}T12:00:00Z`).getUTCDay()]} ${d} ${MON[m - 1]}`),
-        el('span', 'muted', ` ${s.kwh.toFixed(2)} kWh · ${pounds(s.total)}${s.missing ? ` · ${s.missing} missing` : ''}`
+        el('span', 'muted', ` ${s.kwh.toFixed(2)} kWh · ${pounds(s.bill.incTotal)}${s.missing ? ` · ${s.missing} missing` : ''}`
           + `${s.uncostedSlots ? ` · ${s.uncostedSlots} not costed yet` : ''}`),
       );
       const holder = el('div', 'day-chart');
@@ -431,7 +461,7 @@ export class BillsView {
       datasets.push(
         bar('Import off-peak', PALETTE.houseOff, (s) => (iv(s)?.offPeak === true ? iv(s).kwh : null)),
         bar('Import peak', PALETTE.housePeak, (s) => (iv(s) && iv(s).offPeak !== true ? iv(s).kwh : null)),
-        line('Rate p/kWh', text, solid(rateLine(k, day, slots, this.data.publishedFor(k), this.vat), slots)),
+        line('Rate p/kWh', text, solid(rateLine(k, day, slots, this.data.publishedFor(k), this.vat, offWindowOf(this.data.tariffOn(k))), slots)),
       );
     }
     if (eday) {

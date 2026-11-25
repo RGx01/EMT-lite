@@ -330,7 +330,7 @@ describe('today on the heatmap', () => {
   });
 });
 
-import { solid, sideRateLine } from '../src/rates.js';
+import { solid, sideRateLine, inIogWindow, offWindowOf } from '../src/rates.js';
 
 describe('solid rate lines', () => {
   const slots = [0, 1, 2, 3, 4];
@@ -663,5 +663,139 @@ describe('business VAT', () => {
     expect(vatNote({ business: false })).toMatch(/domestic rate/);
     expect(vatNote({ business: true, rate: 0.2, source: 'tariff' })).toMatch(/VAT at 20% .*business account, at the rate your tariff carries/);
     expect(vatNote({ business: true, rate: 0.2, source: 'default' })).toMatch(/standard rate/);
+  });
+});
+
+import { buildSchema } from 'graphql';
+import { checkDocuments } from '../scripts/kraken-check.js';
+import { ALL_DOCUMENTS } from '../src/queries.js';
+
+describe('the Kraken schema check', () => {
+  const schema = buildSchema(`
+    type Query { account(accountNumber: String!): Account }
+    type Account { number: String, accountType: String @deprecated(reason: "Use kind. Removal 2027-01-01."), kind: String }
+  `);
+  it('passes a document the schema has', () => {
+    expect(checkDocuments(schema, { a: 'query { account(accountNumber: "x") { number kind } }' })).toEqual([]);
+  });
+  it('flags a deprecated field, with its reason', () => {
+    const f = checkDocuments(schema, { a: 'query { account(accountNumber: "x") { accountType } }' });
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ document: 'a', kind: 'deprecated' });
+    expect(f[0].message).toMatch(/accountType.*deprecated.*Removal 2027-01-01/);
+  });
+  it('flags a field Octopus no longer has as invalid', () => {
+    const f = checkDocuments(schema, { a: 'query { account(accountNumber: "x") { billingOptions { periodStartDay } } }' });
+    expect(f.map((x) => x.kind)).toEqual(['invalid']);
+    expect(f[0].message).toMatch(/billingOptions/);
+  });
+  it('flags a document that does not parse', () => {
+    expect(checkDocuments(schema, { a: 'query {' })[0].kind).toBe('invalid');
+  });
+  it('every document the page sends parses', () => {
+    for (const [name, src] of Object.entries(ALL_DOCUMENTS)) {
+      const f = checkDocuments(schema, { [name]: src }).filter((x) => /does not parse/.test(x.message));
+      expect(f, name).toEqual([]);
+    }
+  });
+});
+
+import { billMethod, penny, vatLabel } from '../src/bill.js';
+
+describe('Bill Rounding (EMT’s bill method)', () => {
+  const cover = { from: '2026-01-01', last: midnight('2026-10-03'), now: midnight('2026-10-04') };
+  // 3 half-hours a day, each 0.3335p ex VAT, standing 16.0001p ex VAT per half-hour... keep it simple:
+  // a day's energy is 3 × 0.3335 = 1.0005p, which a bill rounds ONCE (1p), not per half-hour (3 × 0p).
+  const ivs = (k) => [0, 1, 2].map((i) => ({ start: midnight(k) + i * HALF_HOUR, kwh: 0.1, costExc: 0.3335,
+    standingExc: i === 0 ? 48.0004 : 0, offPeak: false, split: null }));
+
+  it('sums every half-hour unrounded and rounds each line once', () => {
+    const imp = byDay([...ivs('2026-09-29'), ...ivs('2026-09-30')]);
+    const s = summarise({ start: '2026-09-29', end: '2026-10-01' }, imp, cover);
+    const b = s.bill;
+    expect(b.energyExc).toBe(2);                      // 6 × 0.3335 = 2.001 → 2p
+    expect(b.standingExc).toBe(96);                   // 2 × 48.0004 = 96.0008 → 96p
+    expect(b.standing).toEqual([{ days: 2, rateExc: 48.0004, exc: 96 }]);
+    expect(b.subtotalExc).toBe(98);
+    expect(b.vat).toBe(5);                            // 98.0018 × 5% = 4.90009 → 5p
+    expect(b.incTotal).toBe(103);                     // 102.9019 → 103p
+    expect(b.total).toBe(103);
+    expect(b.vatLabel).toBe('VAT @ 5%');
+  });
+  it('the total is Total incl. VAT less the export credit as printed', () => {
+    const imp = byDay(ivs('2026-09-30'));
+    const exp = byDay([{ start: midnight('2026-09-30') + 24 * HALF_HOUR, kwh: 1.3, costExc: 19.4949, standingExc: null, offPeak: false }]);
+    const s = summarise({ start: '2026-09-30', end: '2026-10-01' }, imp, cover, exp, cover);
+    expect(s.bill.exportCredit).toBe(19);
+    expect(s.bill.total).toBe(s.bill.incTotal - 19);
+  });
+  it('names each VAT rate in force when a period spans a change', () => {
+    const imp = byDay([...ivs('2026-09-30'), ...ivs('2026-10-01')]);
+    const s = summarise({ start: '2026-09-30', end: '2026-10-02' }, imp, cover);
+    expect(s.bill.vatLabel).toBe('VAT @ 5% to 30 Sep, 0% from 1 Oct');
+    // VAT only on 30 Sep: (1.0005 + 48.0004) × 5% = 2.45 → 2p; the ex-VAT standing rate is one line
+    expect(s.bill.vat).toBe(2);
+    expect(s.bill.standing).toHaveLength(1);
+    expect(vatLabel({ '2026-11-01': 0, '2026-11-02': 0 })).toBe('VAT @ 0%');
+  });
+  it('a change in the daily standing charge is its own line', () => {
+    const a = ivs('2026-09-28'), b = ivs('2026-09-29').map((iv) => ({ ...iv, standingExc: iv.standingExc ? 50 : 0 }));
+    const s = summarise({ start: '2026-09-28', end: '2026-09-30' }, byDay([...a, ...b]), cover);
+    expect(s.bill.standing.map((g) => [g.days, g.exc])).toEqual([[1, 48], [1, 50]]);
+  });
+  it('rounds half a penny to even, as Python’s round does', () => {
+    expect([penny(266.5), penny(267.5), penny(266.4999), penny(266.5001), penny(-2.5)]).toEqual([266, 268, 266, 267, -2]);
+  });
+  it('billMethod is a pure function of the unrounded sums', () => {
+    const b = billMethod({ energy: 100.6, standing: 0, energyExc: 100.6, standingDays: {}, vatByDay: {}, exportCredit: 0 });
+    expect(b.incTotal).toBe(101);
+    expect(b.vatLabel).toBe('VAT @ 0%');
+  });
+});
+
+import { pounds } from '../src/bill.js';
+describe('pounds', () => {
+  it('puts a credit’s minus before the pound sign', () => {
+    expect([pounds(-567), pounds(1234), pounds(0), pounds(-0.001)]).toEqual(['−£5.67', '£12.34', '£0.00', '£0.00']);
+  });
+});
+
+describe('IOG rate line: a half-hour with no import (no Octopus split)', () => {
+  // An Intelligent day without the House/EV split: peak 30p, off-peak 5p ex VAT (made-up rates).
+  // A dispatch 19:30–20:30 (slots 39–40), then nothing drawn 20:30–22:30 (slots 41–44), peak at
+  // 23:00 (46), and the IOG window from 23:30 (47).
+  const k = '2026-11-10', t = (s) => midnight(k) + s * HALF_HOUR;
+  const iv = (s, kwh, rate, offPeak) => ({ start: t(s), kwh, costExc: kwh * rate, standingExc: 0, offPeak, split: null });
+  const zero = (s) => ({ start: t(s), kwh: 0, costExc: 0, standingExc: 0, offPeak: null, split: null });
+  const day = byDay([
+    iv(37, 0.2, 30, false), iv(38, 0.2, 30, false), iv(39, 3, 5, true), iv(40, 3, 5, true),
+    zero(41), zero(42), zero(43), zero(44), zero(45), iv(46, 0.1, 30, false), iv(47, 3, 5, true),
+  ]).get(k);
+  const slots = [...slotsOfDay(k)].sort((a, b) => a - b);
+  const line = solid(rateLine(k, day, slots, null, () => 0, inIogWindow), slots);
+
+  it('goes back to peak when the dispatch ends, not the off-peak rate carried on', () => {
+    for (const s of [41, 42, 43, 44, 45]) expect(line.get(s), `slot ${s}`).toBeCloseTo(30);
+  });
+  it('keeps what Octopus charged where there was import', () => {
+    expect(line.get(40)).toBeCloseTo(5);
+    expect(line.get(46)).toBeCloseTo(30);
+    expect(line.get(47)).toBeCloseTo(5);
+  });
+  it('an empty half-hour inside 23:30–05:30 is off-peak', () => {
+    const night = byDay([iv(46, 0.1, 30, false), zero(47), iv(10, 3, 5, true), zero(2)]).get(k);
+    const l = solid(rateLine(k, night, slots, null, () => 0, inIogWindow), slots);
+    expect(l.get(47)).toBeCloseTo(5);
+    expect(l.get(2)).toBeCloseTo(5);
+  });
+  it('the window applies to Intelligent tariffs only', () => {
+    expect(offWindowOf({ productCode: 'INTELLI-VAR-24-10-29' })).toBe(inIogWindow);
+    expect(offWindowOf({ productCode: 'INTELLI-BB-VAR-23-03-01' })).toBe(inIogWindow);
+    expect(offWindowOf({ productCode: 'AGILE-24-10-01' })).toBe(null);
+    expect(offWindowOf(null)).toBe(null);
+  });
+  it('without a window (not Intelligent) the line still carries on, as before', () => {
+    const l = solid(rateLine(k, day, slots, null, () => 0), slots);
+    expect(l.get(41)).toBeCloseTo(5);
   });
 });

@@ -1,0 +1,21 @@
+name: Suggest a change
+description: Something EMT-Lite could show or do
+labels: [enhancement]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        EMT-Lite stays small: a page that shows your Octopus bills and the half-hours with no
+        reading, with nothing but Octopus behind it. For per-device metering, live readings and more,
+        [EMT for Home Assistant](https://github.com/RGx01/EMT) is the bigger tool.
+  - type: textarea
+    id: what
+    attributes:
+      label: What would you like it to do?
+    validations:
+      required: true
+  - type: textarea
+    id: why
+    attributes:
+      label: Why would it help?
+      description: What you are trying to find out from your bills or data.

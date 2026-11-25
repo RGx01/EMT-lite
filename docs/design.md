@@ -45,6 +45,10 @@ Home Assistant's own *Add app repository to My* badge linking to its add-reposit
 the window, carries the same, for narrow screens,
 and a link to this repository's issues, for problems and suggestions.
 
+**Not authoritative.** The bills are worked out from Octopus's half-hourly data and may contain
+mistakes; the customer's Octopus statement is what counts. The sign-in page and every bill card say
+so, with a link to raise an issue (26 Nov 2026).
+
 **Colours** are Okabe–Ito, distinguishable with red-green colour blindness: House off-peak / peak
 sky blue / blue, EV off-peak / peak orange / vermillion, export bluish green, the EV rate reddish
 purple, the House rate the text colour.
@@ -192,6 +196,19 @@ What EMT learned the hard way, which EMT-Lite starts with:
   (`vat_calendar.py`: 5% up to 30 Sep 2026, 0% from 1 Oct 2026, at local midnight).
   **Do not use `costInclTax`**: Octopus's half-hourly figures carried 5% after the change (v4
   #505).
+- **Rounding: EMT's Bill Rounding** (built 25 Nov 2026; EMT `energy_charts._bill_method_breakdown`,
+  `bill_card.bill_total`). This is how Octopus builds a bill.
+  - Every half-hour's ex-VAT cost is summed **unrounded**. Each line of the bill is rounded to the
+    penny **once**: energy ex VAT, standing charge ex VAT (one line per distinct daily rate), VAT,
+    and Total incl. VAT.
+  - The export credit is rounded once, as printed. The bill is Total incl. VAT less that credit.
+  - Lines are rounded separately, so energy + standing + VAT can be a penny off Total incl. VAT, as
+    on EMT's card.
+  - A half penny rounds to even, as Python's `round` does in EMT.
+  - The card shows these lines ex VAT, with a VAT line ("VAT @ 5% to 30 Sep, 0% from 1 Oct" across
+    the change). Each day's table note does the same for that day.
+  - Before this, the card summed VAT-inclusive pence and rounded only for display, so its rows could
+    miss the total by a penny and the export credit was taken off unrounded.
 - **Business VAT** (built 25 Nov 2026). Kraken's `account.accountType` is `BUSINESS…` for a business
   account. Such an account pays the rate its import tariff carries (standing charge inc VAT ÷
   `preVatStandingCharge`; every tariff type has both). The rate comes from the agreement in force
@@ -208,9 +225,13 @@ whether REST is cheaper against the rate limit for months that are only needed f
 The day chart's rate for each half-hour is what Octopus charged:
 `costExclTax ÷ kWh`, with VAT added from the calendar (§5.3).
 
-- **A half-hour with no kWh** has no cost to divide. It takes the rate of that day's half-hours with
-  the same Octopus label (`OFF_PEAK` or `STANDARD_RATE`). If none of the day's half-hours has that
-  label, it has no point and the line has a gap.
+- **A half-hour with no kWh** has no cost to divide, and nothing in it carries a label, so it has no
+  band. On an **Intelligent** tariff (a product code with `INTELLI`, without Octopus's House/EV
+  split) it takes the day's off-peak rate inside IOG's 23:30–05:30 window and the day's peak rate
+  outside it. After a dispatch ends, a half-hour that drew nothing is back at peak; until 26 Nov 2026
+  it carried the dispatch's off-peak rate on. On other tariffs it takes the day's rate only when
+  the day charged a single rate; otherwise it has no point, and the solid line carries the rate
+  before it.
 - **Agile** prices every half-hour differently, so the label does not fill gaps. For an Agile
   agreement, the page also fetches the tariff's published unit rates
   (`/v1/products/{product}/electricity-tariffs/{tariff}/standard-unit-rates/`, using
@@ -280,8 +301,18 @@ day: the database gone, the remembered token and billing day gone, the key field
   standing charge, VAT, off-peak and peak. In EMT that is Python (`bill_card.py`,
   `billing_view.py`). In EMT-Lite it is JavaScript, so it has its own tests.
 - **Tests:** Vitest for the arithmetic and period cutting, with recorded (fictional) Octopus
-  answers as fixtures. One Playwright check confirms the built page loads under its CSP with no
-  violations.
+  answers as fixtures. A Playwright check (`e2e/csp.spec.js`, built 25 Nov 2026) serves the built
+  page with `public/_headers` and runs the demo in Chromium. It fails on any CSP violation, any
+  console error, or a request to a host other than the page and the HA badge's. It also checks that
+  a request to another host is blocked.
+- **CI** (`.github/workflows/`, 25 Nov 2026; CONTRIBUTING.md):
+  - Unit tests with a build, and the CSP check, on every pull request. Both are required on `main`
+    and `dev`.
+  - CodeQL.
+  - A weekly **Kraken schema check**: every GraphQL document in `src/queries.js` is validated
+    against Octopus's live schema, and an issue opens for anything deprecated or removed. The same
+    check runs on a pull request that changes a query.
+- **Branches:** work goes to `dev` (live at `dev.emt-lite.pages.dev`); a release is `dev` → `main`.
 - **Licence:** PolyForm Noncommercial, as EMT.
 
 ## 8. Rejected
@@ -335,7 +366,6 @@ Not yet:
   export detection, the House/EV split and the measurement query all work on an IOG-SMB account
   with export. Its export meter sends zero readings at night, so a night is not hatched green.
 - ~~**Business VAT.**~~ Built 25 Nov 2026 (§5.3). Not yet tried on a real business account.
-- **Playwright CSP check** (§7). Checked by hand: on the live site too (25 Nov 2026), the demo loads
-  with no console errors and a request to any other host is blocked.
+- ~~**Playwright CSP check** (§7).~~ Built 25 Nov 2026, run in CI on every pull request.
 - ~~**Making the repository public**, which §2 requires before anyone else enters a key.~~ Done
   25 Nov 2026.

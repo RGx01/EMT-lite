@@ -13,6 +13,8 @@ npm install
 npm test            # unit tests (Vitest)
 npm run build       # static output in dist/
 npm run preview     # serves dist/ on :4173 with the production headers from public/_headers
+npm run test:e2e    # the CSP check in Chromium (`npx playwright install chromium` once)
+npm run check:kraken  # the page's GraphQL queries against Octopus's live schema
 ```
 
 `npm run dev` serves the source with hot reload but **without** the CSP. Check anything
@@ -20,22 +22,31 @@ security-related with `build` + `preview`.
 
 **Try the demo** on the sign-in page loads a made-up account through the same code a real one uses.
 
+The bills EMT-Lite shows are worked out from Octopus's half-hourly data. They are **not
+authoritative** and may contain mistakes; the customer's Octopus statement is. The page says so on
+the sign-in page and on every bill card, with a link to raise an issue.
+
 ## Deploying
 
-The site is a Cloudflare Pages project, `emt-lite`, served at <https://emt-lite.pages.dev/>. It is
-uploaded with Wrangler, not built by Cloudflare from GitHub. Deploy from a clean checkout of `main`:
+The site is a Cloudflare Pages project, `emt-lite`, uploaded with Wrangler, not built by Cloudflare
+from GitHub. `main` is live at <https://emt-lite.pages.dev/> and `dev` at
+<https://dev.emt-lite.pages.dev/>:
 
 ```bash
 npx wrangler login   # once per machine
-npm run deploy       # refuses uncommitted changes; tests, builds, uploads dist/ tagged with the commit
+npm run deploy:dev   # from a clean dev, level with GitHub
+npm run deploy       # from a clean main, level with GitHub
 ```
 
-`public/_headers` is copied into `dist/` and becomes the live response headers (CSP and the rest).
-After a deploy, check them:
+`scripts/deploy.sh` refuses a dirty tree, the wrong branch, or a branch behind GitHub. It then tests,
+builds and uploads `dist/`, tagged with the commit. `public/_headers` becomes the live response
+headers (CSP and the rest). After a deploy, check them:
 
 ```bash
 curl -sI https://emt-lite.pages.dev/ | grep -i content-security-policy
 ```
+
+Branches, checks and what a change must carry: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 The project was created as a **classic Pages project** (`wrangler pages project create emt-lite
 --production-branch main --force`). Without `--force`, Wrangler 4.168 converts the repository into a
@@ -47,6 +58,7 @@ exists now, so later commands need no `--force`.
 | file | what |
 |---|---|
 | `src/octopus.js` | the only code that talks to Octopus: token, account, measurements, Agile rates |
+| `src/queries.js` | every GraphQL document the page sends, checked weekly against Octopus's schema |
 | `src/data.js` | picks meters and the billing rule; loads months newest first |
 | `src/measurements.js` | Octopus measurement nodes → half-hours (pence, ex VAT) |
 | `src/time.js`, `src/vat.js` | UK local time; VAT by date (domestic) or the business rate |
@@ -54,6 +66,8 @@ exists now, so later commands need no `--force`.
 | `src/heatmap.js`, `src/bills.js`, `src/main.js` | the two views and the page |
 | `src/demo.js` | the demo account |
 | `public/_headers` | Cloudflare Pages response headers (CSP and the rest) |
+| `tests/`, `e2e/` | Vitest unit tests; the Playwright CSP check |
+| `scripts/` | the Kraken schema check, the deploy script |
 
 ## Licence
 
