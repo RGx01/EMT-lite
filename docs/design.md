@@ -1,6 +1,6 @@
 # EMT-Lite — billing charts and a missing-data heatmap in the browser
 
-*Design, 25 Nov 2026. **Draft, not built.** Its six open questions were decided on 25 Nov 2026 (§9). Almost everything it knows about Octopus,
+*Design, 25 Nov 2026. **Being built** (first pass 25 Nov 2026, §10). Its six open questions were decided on 25 Nov 2026 (§9). Almost everything it knows about Octopus,
 EMT learned first: a file named here without a repository (`kraken_api_client.py`,
 `web/templates/heatmap_module.html`, …) is in [RGx01/EMT](https://github.com/RGx01/EMT).
 This repository is private while the design is drafted, and goes public before the first user
@@ -185,9 +185,10 @@ deletes the database.
 
 - **Plain JavaScript modules and Vite**, producing static output. No framework: two views do not
   need one, and every dependency is attack surface (§4.2).
-- **Chart.js 4 and `chartjs-chart-matrix`**, as EMT uses. The heatmap and day charts start as
-  ports of `heatmap_module.html` and `billing_module.html`, with the EMT-only parts removed:
-  corrections, settlement states, devices, carbon, PDF.
+- **Chart.js 4** for the day charts, as EMT uses. The heatmap is drawn on a plain canvas with
+  EMT's colour stops, so `chartjs-chart-matrix` is not needed: one dependency fewer (§4.2).
+  Both views are written fresh from `heatmap_module.html` and `billing_module.html`, without the
+  EMT-only parts: corrections, settlement states, devices, carbon, PDF.
 - **Hatching:** a canvas pattern (`createPattern` from a small black-and-white diagonal tile) as
   the cell's fill. EMT's heatmap already draws its "no block" cells this way.
 - **The bill card's arithmetic** lives in one pure module with unit tests: periods, totals,
@@ -227,3 +228,26 @@ Still open:
    months that are only needed for the heatmap (§5.3).
 2. The refresh token's lifetime (§4.4) and whether `periodStartDay` is filled in (§5.2). Both are
    checked with a real key, first thing when built.
+
+## 10. The first pass (25 Nov 2026)
+
+Built on `feat/scaffold`: sign-in with the key or a remembered refresh token, account and meter
+discovery, the billing day (Octopus, then the latest bill, then the user), months loaded newest
+first with the day and noon-to-noon cost fallbacks, Agile's published rates, the Bills view with
+day charts, and the heatmap with Import / Export. Checked under the production headers with
+`npm run preview`: no CSP violations, and a request to any other host is blocked.
+
+Added beyond the design:
+
+- **Try the demo.** A made-up account that runs through the same loader, so the page can be seen
+  before a key is pasted. Its account and MPANs are the project placeholders.
+- **'Future' half-hours.** A half-hour that has not happened yet is neither missing nor pending,
+  and a period that has not ended is shown "so far", without comparisons.
+
+Not yet:
+
+- **Tried with a real key.** The sign-in, `billingOptions`, `refreshExpiresIn`, export detection by
+  `direction` and the measurement query are written to the schema but unrun against an account.
+- **The IndexedDB cache** (§6). Everything is in memory; a remembered device re-fetches.
+- **Business VAT.** The calendar is domestic (§5.3).
+- **Playwright CSP check** (§7). Checked by hand this time.
