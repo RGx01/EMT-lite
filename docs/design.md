@@ -158,8 +158,9 @@ introspection on 25 Nov 2026.
 Not used: `currentBillingPeriodStartDate` and the statements' dates. On the first real account
 tried, the user's billing day was the 3rd while Octopus held no start day and no billing trigger,
 its current period began on a different day, and its statements closed on different days each
-month. The payment schedule's `paymentDay` is the Direct Debit day, not the billing day; it is
-shown, not used. All of these are listed under *What Octopus says about your billing* on the page.
+month. The payment schedule's `paymentDay` is the Direct Debit day, not the billing day. The page
+does not fetch or show any of these. A panel that listed them (*What Octopus says about your
+billing*) was dropped on 25 Nov 2026 as not useful.
 
 **Monthly and quarterly use one rule.** Bill periods step from the billing day in `periodLength` ×
 `periodLengthMultiplier` months (monthly unless Octopus says otherwise).
@@ -191,6 +192,12 @@ What EMT learned the hard way, which EMT-Lite starts with:
   (`vat_calendar.py`: 5% up to 30 Sep 2026, 0% from 1 Oct 2026, at local midnight).
   **Do not use `costInclTax`**: Octopus's half-hourly figures carried 5% after the change (v4
   #505).
+- **Business VAT** (built 25 Nov 2026). Kraken's `account.accountType` is `BUSINESS…` for a business
+  account. Such an account pays the rate its import tariff carries (standing charge inc VAT ÷
+  `preVatStandingCharge`; every tariff type has both). The rate comes from the agreement in force
+  now, else the latest, snapped to a statutory rate (0, 5 or 20%). If no tariff shows one, the
+  standard 20% is used. That one rate applies to every day loaded, because the calendar's 0% from
+  1 Oct 2026 is domestic. The bill card says which rate was added and why.
 
 The REST `/consumption/` endpoint is not needed: `measurements` has the kWh too. *Still open:
 whether REST is cheaper against the rate limit for months that are only needed for the heatmap
@@ -327,7 +334,7 @@ Not yet:
 - ~~Tried with a real key.~~ Done 25 Nov 2026: sign-in, Remember me, account discovery, statements,
   export detection, the House/EV split and the measurement query all work on an IOG-SMB account
   with export. Its export meter sends zero readings at night, so a night is not hatched green.
-- **Business VAT.** The calendar is domestic (§5.3).
+- ~~**Business VAT.**~~ Built 25 Nov 2026 (§5.3). Not yet tried on a real business account.
 - **Playwright CSP check** (§7). Checked by hand: on the live site too (25 Nov 2026), the demo loads
   with no console errors and a request to any other host is blocked.
 - ~~**Making the repository public**, which §2 requires before anyone else enters a key.~~ Done

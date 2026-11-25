@@ -33,7 +33,7 @@ function emptyBand() { return { kwh: 0, cost: 0 }; }
  * Summarise [period.start, period.end). `imp` / `exp` are byDay() maps (exp may be null);
  * `impCover` / `expCover` as slotState's `cover`.
  */
-export function summarise(period, imp, impCover, exp = null, expCover = null) {
+export function summarise(period, imp, impCover, exp = null, expCover = null, vat = vatRate) {
   const s = {
     days: 0, finished: dayKeyOf(impCover.now ?? Date.now()) >= period.end, kwh: 0, energy: 0, standing: 0, total: 0,
     offPeak: emptyBand(), peak: emptyBand(), unbanded: emptyBand(),
@@ -46,7 +46,7 @@ export function summarise(period, imp, impCover, exp = null, expCover = null) {
   for (const k of daysBetween(period.start, period.end)) {
     if (k > today) break;
     s.days++;
-    const v = 1 + vatRate(k);
+    const v = 1 + vat(k);
     const day = imp.get(k);
     for (const slot of slotsOfDay(k)) {
       const st = slotState(imp, k, slot, impCover);

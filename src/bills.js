@@ -7,7 +7,7 @@ import {
 } from 'chart.js';
 import { billPeriods, calendarPeriods, previousOf, lastYearOf, periodLabel } from './periods.js';
 import { summarise, pounds } from './bill.js';
-import { vatRate } from './vat.js';
+import { vatFor } from './vat.js';
 import { rateLine, solid, sideRateLine, exportRateLine } from './rates.js';
 import { daysBetween, slotsOfDay, todayKey, parseKey, addDays } from './time.js';
 
@@ -50,6 +50,15 @@ const fmtSlot = (s) => `${String(Math.floor(s / 2)).padStart(2, '0')}:${s % 2 ? 
 /** The page's own header bar, which stays at the top above the bills' bar. */
 const topBarHeight = () => document.querySelector('.top')?.offsetHeight || 0;
 
+/** The bill card's VAT line: how VAT was added to Octopus's ex-VAT costs. */
+export function vatNote(vat) {
+  if (!vat?.business) return 'VAT added to Octopus’s ex-VAT costs by date (domestic rate).';
+  const pct = `${+(vat.rate * 100).toFixed(1)}%`;
+  return vat.source === 'tariff'
+    ? `VAT at ${pct} added to Octopus’s ex-VAT costs: a business account, at the rate your tariff carries.`
+    : `VAT at ${pct} added to Octopus’s ex-VAT costs: a business account, at the standard rate (your tariff does not show its VAT).`;
+}
+
 function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -61,12 +70,12 @@ export class BillsView {
   constructor(root, data, { onBillingDay }) {
     this.root = root;
     this.data = data;
+    this.vat = vatFor(data.info.vat);   // dayKey → VAT rate: the calendar, or a business account's rate
     this.onBillingDay = onBillingDay;
     this.mode = data.info.billing ? 'bill' : 'month';
     this.sel = null;
     this.prompt = null;          // the billing-day form, while open: { value, focus }
     this.showData = false;       // every day's data table open (the header's Show Data)
-    this.evidenceOpen = false;
     this.charts = [];
     this.observer = null;
   }
@@ -166,10 +175,9 @@ export class BillsView {
     this.root.append(where);
     // a redraw (each month that loads) keeps an open form and fold-out as they were
     if (this.mode === 'bill' && this.prompt) where.after(this.billingDayPrompt());
-    if (this.mode === 'bill' && this.data.info.evidence) this.root.append(this.evidence());
 
     const d = this.data;
-    const sum = (q) => q && summarise(q, d.impDays, d.impCover, d.expDays, d.expCover);
+    const sum = (q) => q && summarise(q, d.impDays, d.impCover, d.expDays, d.expCover, this.vat);
     const s = sum(p), sp = sum(previousOf(list, p)), sy = sum(lastYearOf(list, p));
     const card = this.card(p, s, sp, sy);
     this.root.append(card);
@@ -197,7 +205,7 @@ export class BillsView {
   dayTable(k) {
     const slots = [...slotsOfDay(k)].sort((a, b) => a - b);
     const day = this.data.impDays.get(k), eday = this.data.expDays?.get(k);
-    const v = 1 + vatRate(k);
+    const v = 1 + this.vat(k);
     const split = slots.some((s) => day?.get(s)?.split);
     const t = el('table', 'day-data');
     const head = ['Time', 'Import kWh', 'Rate p/kWh', 'Import £'];
@@ -245,36 +253,10 @@ export class BillsView {
     const wrap = el('div', 'day-data-wrap');
     wrap.append(t);
     // the day header's £ is energy and standing charge together: say so under the table
-    const sd = summarise({ start: k, end: addDays(k, 1) }, this.data.impDays, this.data.impCover, this.data.expDays, this.data.expCover);
+    const sd = summarise({ start: k, end: addDays(k, 1) }, this.data.impDays, this.data.impCover, this.data.expDays, this.data.expCover, this.vat);
     wrap.append(el('p', 'day-data-note', `Standing charge ${pounds(sd.standing)} · day total ${pounds(sd.total)}`
       + `${sd.exportCredit ? ` · after export ${pounds(sd.net)}` : ''} · £ include VAT on import, none on export.`));
     return wrap;
-  }
-
-  /** What Octopus holds about billing, so the billing day can be traced to its source. */
-  evidence() {
-    const { options: o, trigger: t, payments: ps = [], bills: bs = [] } = this.data.info.evidence;
-    const box = el('details', 'evidence');
-    box.open = !!this.evidenceOpen;
-    box.addEventListener('toggle', () => { this.evidenceOpen = box.open; });
-    box.append(el('summary', null, 'What Octopus says about your billing'));
-    const lines = el('ul');
-    const li = (text) => lines.append(el('li', null, text));
-    li(o ? `Billing options: start day ${o.periodStartDay ?? 'not set'}, ${String(o.periodLength ?? '—').toLowerCase()}`
-      + `; current period from ${o.currentBillingPeriodStartDate ?? '—'}` : 'Billing options: none');
-    if (t?.error) {
-      li(`Billing trigger: could not be read (${t.error})`);
-    } else if (t) {
-      const fs = (t.operationFrequencies || []).map((f) => `${String(f.operationType).toLowerCase()} ${String(f.frequency).toLowerCase()}`
-        + ` on day ${f.triggerAtStartDay}`);
-      li(`Billing trigger${t.isActive === false ? ' (inactive)' : ''}: ${fs.join('; ') || 'no frequencies'}; next issue ${t.nextIssueDate ?? '—'}`);
-    } else {
-      li('Billing trigger: none');
-    }
-    for (const p of ps) li(`Payment schedule: day ${p.paymentDay ?? '—'}, ${String(p.paymentFrequency ?? '').toLowerCase()} (not used as the billing day)`);
-    for (const b of bs.slice(0, 3)) li(`${String(b.billType || 'Bill').toLowerCase()}: ${b.fromDate} to ${b.toDate ?? '—'}`);
-    box.append(lines);
-    return box;
   }
 
   billingDayPrompt() {
@@ -363,7 +345,7 @@ export class BillsView {
     if (s.unsplitSlots) notes.append(el('li', 'warn', `${s.unsplitSlots} costed half-hour${s.unsplitSlots === 1 ? '' : 's'} without Octopus’s House/EV split yet: the split rows add up to less than the energy.`));
     if (s.split) notes.append(el('li', 'muted', 'Octopus can revise its House/EV split for some days after it first appears.'));
     if (s.pending) notes.append(el('li', 'muted', `${s.pending} half-hour${s.pending === 1 ? '' : 's'} not in from Octopus yet.`));
-    notes.append(el('li', 'muted', 'VAT added to Octopus’s ex-VAT costs by date (domestic rate).'));
+    notes.append(el('li', 'muted', vatNote(this.data.info.vat)));
     card.append(notes);
     return card;
   }
@@ -385,7 +367,7 @@ export class BillsView {
       box.dataset.day = k;
       const { m, d } = parseKey(k);
       const s = summarise({ start: k, end: addDays(k, 1) },
-        this.data.impDays, this.data.impCover, this.data.expDays, this.data.expCover);
+        this.data.impDays, this.data.impCover, this.data.expDays, this.data.expCover, this.vat);
       const head = el('div', 'day-head');
       head.append(
         el('strong', null, `${DOW[new Date(`${k}T12:00:00Z`).getUTCDay()]} ${d} ${MON[m - 1]}`),
@@ -440,16 +422,16 @@ export class BillsView {
       if (slots.some((s) => iv(s) && !iv(s).split)) {
         datasets.push(bar('Not split yet', PALETTE.unsplit, (s) => (iv(s) && !iv(s).split ? iv(s).kwh : null)));
       }
-      datasets.push(line('House rate p/kWh', text, sideRateLine(k, day, slots, 'home')));
+      datasets.push(line('House rate p/kWh', text, sideRateLine(k, day, slots, 'home', this.vat)));
       if (slots.some((s) => (iv(s)?.split?.['ev:off']?.kwh || 0) + (iv(s)?.split?.['ev:peak']?.kwh || 0) > 0)) {
         // wider and beneath the House line: where the two rates are the same, it shows as an edge
-        datasets.push({ ...line('EV rate p/kWh', PALETTE.evRate, sideRateLine(k, day, slots, 'ev')), order: 1.5, borderWidth: 6 });
+        datasets.push({ ...line('EV rate p/kWh', PALETTE.evRate, sideRateLine(k, day, slots, 'ev', this.vat)), order: 1.5, borderWidth: 6 });
       }
     } else {
       datasets.push(
         bar('Import off-peak', PALETTE.houseOff, (s) => (iv(s)?.offPeak === true ? iv(s).kwh : null)),
         bar('Import peak', PALETTE.housePeak, (s) => (iv(s) && iv(s).offPeak !== true ? iv(s).kwh : null)),
-        line('Rate p/kWh', text, solid(rateLine(k, day, slots, this.data.publishedFor(k)), slots)),
+        line('Rate p/kWh', text, solid(rateLine(k, day, slots, this.data.publishedFor(k), this.vat), slots)),
       );
     }
     if (eday) {

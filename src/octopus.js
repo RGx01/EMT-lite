@@ -158,9 +158,9 @@ export class Octopus {
   }
 
   async accountInfo(number) {
-    const tariff = (t) => `... on ${t} { productCode tariffCode isExport displayName }`;
+    const tariff = (t) => `... on ${t} { productCode tariffCode isExport displayName standingCharge preVatStandingCharge }`;
     const d = await this.gql(
-      `query acc($n: String!) { account(accountNumber: $n) {
+      `query acc($n: String!) { account(accountNumber: $n) { accountType
         billingOptions { periodStartDay periodLength periodLengthMultiplier isFixed
           currentBillingPeriodStartDate currentBillingPeriodEndDate nextBillingDate }
         properties { id electricityMeterPoints { mpan direction
@@ -180,26 +180,6 @@ export class Octopus {
       { n: number },
     );
     return d.account?.billingTriggerConfiguration || null;
-  }
-
-  /** Active payment schedules (the Direct Debit day): shown, never taken as the billing day. */
-  async paymentSchedules(number) {
-    const d = await this.gql(
-      `query p($n: String!) { account(accountNumber: $n) { paymentSchedules(first: 5, active: true) { edges { node {
-        paymentDay paymentFrequency paymentFrequencyMultiplier validFrom validTo } } } } }`,
-      { n: number },
-    );
-    return (d.account?.paymentSchedules?.edges || []).map((e) => e.node).filter(Boolean);
-  }
-
-  /** The account's recent bills, newest first: [{ fromDate, toDate, issuedDate, billType }]. */
-  async recentBills(number) {
-    const d = await this.gql(
-      'query b($n: String!) { account(accountNumber: $n) { bills(first: 12) { edges { node { billType fromDate toDate issuedDate } } } } }',
-      { n: number },
-    );
-    return (d.account?.bills?.edges || []).map((e) => e.node).filter((b) => b?.fromDate)
-      .sort((x, y) => String(y.fromDate).localeCompare(String(x.fromDate)));
   }
 
   /** Half-hours for [fromKey, toKey) local days, with costs. `direction`: CONSUMPTION | GENERATION. */

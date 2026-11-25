@@ -5,6 +5,7 @@ import { recoverCosts } from './octopus.js';
 import { reusable, monthKey, CACHE_SHAPE } from './cache.js';
 import { byDay } from './measurements.js';
 import { anchorFromBillingDay } from './periods.js';
+import { statutoryRate } from './vat.js';
 import { addMonths, addDays, parseKey, todayKey, dayKeyOf, midnight, HALF_HOUR, slotOf, dayWindows } from './time.js';
 
 export const DEFAULT_MONTHS = 13;
@@ -33,6 +34,26 @@ function meterOf(mp) {
   return { mpan: mp.mpan, agreements: ags, from: dateKey(ags[0]?.validFrom) };
 }
 
+/** The default for a business account whose tariff does not show its VAT: the standard rate. */
+export const BUSINESS_VAT_DEFAULT = 0.2;
+
+/**
+ * The account's VAT (design §5.3). Domestic: the calendar (vat.js). Business (Kraken's
+ * `accountType` BUSINESS…): the rate its import tariff carries, standing charge inc VAT ÷ ex VAT,
+ * from the agreement in force now (else the latest), snapped to a statutory rate; 20% if no tariff
+ * shows one. One rate throughout: business VAT on electricity has not changed in the years loaded.
+ */
+export function accountVat(accountType, agreements, now = Date.now()) {
+  if (!/^BUSINESS/i.test(String(accountType || ''))) return { business: false, rate: null, source: 'calendar' };
+  const ags = [agreementAt(agreements, now), ...(agreements || []).slice().reverse()].filter(Boolean);
+  for (const a of ags) {
+    const inc = Number(a.tariff?.standingCharge), exc = Number(a.tariff?.preVatStandingCharge);
+    const r = exc > 0 && inc > 0 ? statutoryRate(inc / exc - 1) : null;
+    if (r != null) return { business: true, rate: r, source: 'tariff' };
+  }
+  return { business: true, rate: BUSINESS_VAT_DEFAULT, source: 'default' };
+}
+
 /** Pick meters and the billing rule from Octopus's account answer. Pure. */
 export function describeAccount(number, acc, today = todayKey()) {
   const points = (acc?.properties || []).flatMap((p) => p.electricityMeterPoints || []);
@@ -49,7 +70,8 @@ export function describeAccount(number, acc, today = todayKey()) {
   const months = (String(bo.periodLength || 'MONTHLY').toUpperCase() === 'QUARTERLY' ? 3 : 1)
     * Math.max(1, Number(bo.periodLengthMultiplier) || 1);
   const billing = bo.periodStartDay ? billingFromDay(bo.periodStartDay, 'octopus', today, months) : null;
-  return { number, import: imp && meterOf(imp), export: exp && meterOf(exp), billing };
+  const vat = accountVat(acc?.accountType, imp ? meterOf(imp).agreements : [], now);
+  return { number, import: imp && meterOf(imp), export: exp && meterOf(exp), billing, vat };
 }
 
 export const DEFAULT_BILLING_DAY = 1;
