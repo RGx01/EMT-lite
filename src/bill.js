@@ -6,12 +6,14 @@
 // which is how Octopus builds a bill: every half-hour's ex-VAT cost is summed UNROUNDED, and only
 // the bill's lines are rounded to the penny, once each (billMethod below).
 
-import { daysBetween, slotsOfDay, dayKeyOf, slotOf } from './time.js';
+import { daysBetween, slotsOfDay, dayKeyOf, slotOf, instantsOf, HALF_HOUR } from './time.js';
 import { vatRate } from './vat.js';
 
 /**
  * What one half-hour is, for the heatmap and the bill's gap count:
  *   'present'  — Octopus has a reading
+ *   'partial'  — the clocks-back day's repeated half-hour, with one of its two readings missing:
+ *                what is there counts, and the other is missing
  *   'missing'  — it should have one and does not (hatched)
  *   'pending'  — after Octopus's latest reading: not in yet, not missing
  *   'outside'  — before the supply started on this meter
@@ -20,8 +22,19 @@ import { vatRate } from './vat.js';
  *             now: ms (defaults to the clock) }.
  */
 export function slotState(days, dayKey, slot, cover) {
-  if (days.get(dayKey)?.has(slot)) return 'present';
   const now = cover.now ?? Date.now(), today = dayKeyOf(now);
+  const iv = days.get(dayKey)?.get(slot);
+  if (iv) {
+    // A repeated clocks-back half-hour is two readings; one absent, finished and not merely late
+    // (at or before the latest reading, after the supply began) is missing.
+    const inst = instantsOf(dayKey, slot);
+    if (inst.length > 1 && iv.starts) {
+      const gone = inst.filter((t) => !iv.starts.includes(t) && t + HALF_HOUR <= now
+        && cover.last != null && t <= cover.last && !(cover.from && dayKeyOf(t) < cover.from));
+      if (gone.length) return 'partial';
+    }
+    return 'present';
+  }
   // the half-hour in progress has not finished: it is future too
   if (dayKey > today || (dayKey === today && slot >= slotOf(now))) return 'future';
   if (cover.from && dayKey < cover.from) return 'outside';
@@ -58,9 +71,9 @@ export function summarise(period, imp, impCover, exp = null, expCover = null, va
     const day = imp.get(k);
     for (const slot of slotsOfDay(k)) {
       const st = slotState(imp, k, slot, impCover);
-      if (st === 'missing') s.missing++;
+      if (st === 'missing' || st === 'partial') s.missing++;
       if (st === 'pending') s.pending++;
-      if (st !== 'present') continue;
+      if (st !== 'present' && st !== 'partial') continue;
       const iv = day.get(slot);
       s.kwh += iv.kwh;
       if (iv.standingExc != null) {
@@ -96,8 +109,8 @@ export function summarise(period, imp, impCover, exp = null, expCover = null, va
       const eday = exp.get(k);
       for (const slot of slotsOfDay(k)) {
         const st = slotState(exp, k, slot, expCover);
-        if (st === 'missing') s.exportMissing++;
-        if (st !== 'present') continue;
+        if (st === 'missing' || st === 'partial') s.exportMissing++;
+        if (st !== 'present' && st !== 'partial') continue;
         const iv = eday.get(slot);
         s.exportKwh += iv.kwh;
         if (iv.costExc != null) s.exportCredit += Math.abs(iv.costExc);

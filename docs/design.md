@@ -64,7 +64,13 @@ hatched. Keeping the two apart is the point of the heatmap: hatched squares are 
 can be short.
 
 Local-time rules come from EMT's heatmap: the clocks-forward hour does not exist and is left blank,
-**not** hatched; the repeated clocks-back hour is summed into its slot.
+**not** hatched; the repeated clocks-back hour is summed into its slot. Each slot remembers which UTC
+half-hours it holds. If one of a repeated half-hour's two readings is missing (finished, at or before
+Octopus's latest reading), the slot is **partial** (26 Nov 2026):
+- the half it has still counts
+- the bill counts it as missing
+- the heatmap hatches it as missing on that side
+- its tooltip says one of the two readings is missing
 
 ## 2. The trust model: the key never leaves the browser
 

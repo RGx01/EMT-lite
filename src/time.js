@@ -80,6 +80,15 @@ export function slotsOfDay(k) {
   return s;
 }
 
+/** The UTC instants on day `k` whose local slot is `slot`: one, or two for the repeated
+ *  clocks-back half-hours (01:00 and 01:30 in BST, then again in GMT), or none when skipped. */
+export function instantsOf(k, slot) {
+  const out = [];
+  const end = midnight(addDays(k, 1));
+  for (let t = midnight(k); t < end; t += HALF_HOUR) if (slotOf(t) === slot) out.push(t);
+  return out;
+}
+
 /** Every day key from `a` to `b`, `b` excluded. */
 export function daysBetween(a, b) {
   const out = [];

@@ -799,3 +799,50 @@ describe('IOG rate line: a half-hour with no import (no Octopus split)', () => {
     expect(l.get(41)).toBeCloseTo(5);
   });
 });
+
+describe('the clocks-back day: one of a repeated half-hour’s two readings missing', () => {
+  // 25 Oct 2026: 01:00 and 01:30 happen twice, in BST (00:00Z, 00:30Z) then GMT (01:00Z, 01:30Z).
+  const k = '2026-10-25';
+  const iv = (iso, kwh) => ({ start: Date.parse(iso), kwh, costExc: kwh * 20, standingExc: 0, offPeak: null, split: null });
+  // every half-hour of the day, then drop the GMT 01:00 reading (slot 2's second half)
+  const all = [];
+  for (let t = midnight(k); t < midnight('2026-10-26'); t += HALF_HOUR) all.push(iv(new Date(t).toISOString(), 0.5));
+  const gappy = all.filter((x) => x.start !== Date.parse('2026-10-25T01:00:00Z'));
+  const cover = { from: '2026-01-01', last: midnight('2026-10-26') - HALF_HOUR, now: midnight('2026-10-27') };
+
+  it('(guard) both readings there: present, summed', () => {
+    const d = byDay(all);
+    expect(slotState(d, k, 2, cover)).toBe('present');
+    expect(d.get(k).get(2).kwh).toBeCloseTo(1.0);
+  });
+  it('one of the two missing: partial, not present', () => {
+    const d = byDay(gappy);
+    expect(slotState(d, k, 2, cover)).toBe('partial');
+    expect(slotState(d, k, 3, cover)).toBe('present');
+    expect(d.get(k).get(2).kwh).toBeCloseTo(0.5);
+  });
+  it('(guard) the other half not in yet (after the latest reading) is not missing', () => {
+    const early = gappy.filter((x) => x.start < Date.parse('2026-10-25T01:00:00Z'));
+    const c = { ...cover, last: Date.parse('2026-10-25T00:30:00Z') };
+    expect(slotState(byDay(early), k, 2, c)).toBe('present');
+  });
+  it('the bill counts it missing and still adds up the half it has', () => {
+    const s = summarise({ start: k, end: '2026-10-26' }, byDay(gappy), cover);
+    expect(s.missing).toBe(1);
+    expect(s.kwh).toBeCloseTo(49 * 0.5);
+  });
+  it('the heatmap hatches it, and the day bar counts it', () => {
+    const d = byDay(gappy);
+    const c = cellOf(d, cover, null, null, k, 2);
+    expect(c.hatch).toBe('bw');
+    expect(c.value).toBeCloseTo(0.5);
+    const cells = Array.from({ length: 48 }, (_, s) => cellOf(d, cover, null, null, k, s));
+    expect(daySummary(cells).missImp).toBe(1);
+  });
+  it('with export there, a half-missing import is hatched red over the colour', () => {
+    const exp = byDay(all.map((x) => ({ ...x, kwh: 0.1 })));
+    const c = cellOf(byDay(gappy), cover, exp, cover, k, 2);
+    expect(c.hatch).toBe('red');
+    expect(c.value).toBeCloseTo(0.5 - 0.2);
+  });
+});
