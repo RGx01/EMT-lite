@@ -341,14 +341,71 @@ describe('solid rate lines', () => {
   it('a side that drew nothing takes its band’s rate, then the other side’s', () => {
     const sp = (ev, home, band) => ({ [`ev:${band}`]: { kwh: ev, cost: ev * (band === 'off' ? 7 : 24.5) },
       [`home:${band}`]: { kwh: home, cost: home * (band === 'off' ? 7 : 24.5) } });
+    // 14:00 a dispatch, 14:30 peak (afternoon: outside IOG's 23:30–05:30 window)
     const day = new Map([
-      [0, { kwh: 3.7, offPeak: true, split: sp(3.5, 0.2, 'off') }],
-      [1, { kwh: 0.3, offPeak: false, split: sp(0, 0.3, 'peak') }],
+      [28, { kwh: 3.7, offPeak: true, split: sp(3.5, 0.2, 'off') }],
+      [29, { kwh: 0.3, offPeak: false, split: sp(0, 0.3, 'peak') }],
     ]);
-    const ev = sideRateLine('2026-10-01', day, [0, 1], 'ev');
-    expect(ev.get(0)).toBeCloseTo(7);
-    expect(ev.get(1)).toBeCloseTo(24.5);     // EV drew nothing at peak: the house's peak rate
-    const home = sideRateLine('2026-10-01', day, [0, 1], 'home');
-    expect(home.get(1)).toBeCloseTo(24.5);
+    const ev = sideRateLine('2026-10-01', day, [28, 29], 'ev');
+    expect(ev.get(28)).toBeCloseTo(7);
+    expect(ev.get(29)).toBeCloseTo(24.5);    // EV drew nothing at peak: the house's peak rate
+    const home = sideRateLine('2026-10-01', day, [28, 29], 'home');
+    expect(home.get(29)).toBeCloseTo(24.5);
+  });
+});
+
+describe('IOG-SMB rate lines: a side that drew nothing', () => {
+  const sp = (evOff, homeOff, homePeak) => ({
+    'ev:off': { kwh: evOff, cost: evOff * 7 }, 'ev:peak': { kwh: 0, cost: 0 },
+    'home:off': { kwh: homeOff, cost: homeOff * 7 }, 'home:peak': { kwh: homePeak, cost: homePeak * 30 },
+  });
+  // 20:00 house peak; 20:30–21:00 a dispatch (EV off-peak, house off-peak); 21:30–23:00 the house
+  // draws nothing (a battery); 23:30 the window
+  const day = new Map([
+    [40, { kwh: 0.4, offPeak: false, split: sp(0, 0, 0.4) }],
+    [41, { kwh: 3.6, offPeak: true, split: sp(3.4, 0.2, 0) }],
+    [42, { kwh: 3.5, offPeak: true, split: sp(3.4, 0.1, 0) }],
+    [43, { kwh: 0, offPeak: null, split: sp(0, 0, 0) }],
+    [44, { kwh: 0, offPeak: null, split: sp(0, 0, 0) }],
+    [47, { kwh: 0, offPeak: null, split: sp(0, 0, 0) }],
+  ]);
+  const slots = [40, 41, 42, 43, 44, 45, 46, 47];
+  it('is at peak after the dispatch ends, not carried at the dispatch’s off-peak', () => {
+    const home = sideRateLine('2026-11-22', day, slots, 'home');
+    expect(home.get(42)).toBeCloseTo(7);
+    expect(home.get(43)).toBeCloseTo(30);
+    expect(home.get(46)).toBeCloseTo(30);      // no reading at all: still peak by the time of day
+    expect(home.get(47)).toBeCloseTo(7);       // 23:30: the off-peak window
+  });
+  it('the EV line follows the same bands', () => {
+    const ev = sideRateLine('2026-11-22', day, slots, 'ev');
+    expect(ev.get(41)).toBeCloseTo(7);
+    expect(ev.get(43)).toBeCloseTo(30);        // EV has no peak rate that day: the house's
+    expect(ev.get(47)).toBeCloseTo(7);
+  });
+});
+
+import { exportRateLine } from '../src/rates.js';
+
+describe('export rate line', () => {
+  it('a flat export rate fills the day, with no VAT', () => {
+    const day = new Map([[24, { kwh: 1.2, costExc: 18 }], [26, { kwh: 0.4, costExc: 6 }]]);
+    const r = exportRateLine(day, [0, 24, 26, 47]);
+    expect([...r.values()]).toEqual([15, 15, 15, 15]);
+  });
+  it('a day with no export has no line', () => {
+    expect([...exportRateLine(new Map([[0, { kwh: 0, costExc: 0 }]]), [0, 1]).values()]).toEqual([null, null]);
+  });
+});
+
+describe('export rate rounding', () => {
+  it('a flat rate returned with rounding noise is drawn flat', () => {
+    const day = new Map([[24, { kwh: 0.07, costExc: 1 }], [25, { kwh: 1.2, costExc: 18 }], [26, { kwh: 0.13, costExc: 2 }]]);
+    const r = exportRateLine(day, [24, 25, 26]);
+    expect(new Set(r.values()).size).toBe(1);
+  });
+  it('a varying rate (Agile Outgoing) is kept', () => {
+    const day = new Map([[24, { kwh: 1, costExc: 5 }], [25, { kwh: 1, costExc: 18 }]]);
+    expect(exportRateLine(day, [24, 25]).get(24)).toBeCloseTo(5);
   });
 });

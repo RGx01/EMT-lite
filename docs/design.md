@@ -184,7 +184,13 @@ The day chart's rate for each half-hour is what Octopus charged:
   the zero-kWh half-hours. Where kWh is not zero, the charged rate still comes from the cost.
 - **Solid lines:** a half-hour left without a rate takes the one before it (the first after it at
   the start of the day), so the line has no gaps. On IOG-SMB the House and EV each get a line:
-  that side's bucket cost ÷ its kWh, or, where it drew nothing, its band's rate that day.
+  that side's bucket cost ÷ its kWh. Where a side drew nothing (a battery covering the house, say),
+  the half-hour's **band** decides, never the half-hour before: off-peak if any bucket in it
+  carries off-peak (a dispatch), else off-peak inside IOG's 23:30–05:30 window, else peak; the
+  rate is that side's own rate for the band that day, or the other side's. (Carrying the rate on
+  left a house at the dispatch's off-peak rate until 23:30, found on a real account 25 Nov 2026.)
+- **Export rate:** payment ÷ kWh, no VAT. Octopus rounds each half-hour's amount, so when every
+  payment is within half a penny of one rate × its kWh, the day is drawn at that one rate.
 - Rejected: published rates for every account. They miss Intelligent's dispatch off-peak
   half-hours, which only Octopus's labels carry.
 

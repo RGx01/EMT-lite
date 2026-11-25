@@ -7,7 +7,7 @@ import {
 } from 'chart.js';
 import { billPeriods, calendarPeriods, previousOf, lastYearOf, periodLabel } from './periods.js';
 import { summarise, pounds } from './bill.js';
-import { rateLine, solid, sideRateLine } from './rates.js';
+import { rateLine, solid, sideRateLine, exportRateLine } from './rates.js';
 import { daysBetween, slotsOfDay, todayKey, parseKey, addDays } from './time.js';
 
 Chart.register(BarController, BarElement, LineController, LineElement, PointElement, LinearScale, CategoryScale, Tooltip, Legend);
@@ -16,7 +16,7 @@ Chart.register(BarController, BarElement, LineController, LineElement, PointElem
 const PALETTE = {
   houseOff: '#56B4E9', housePeak: '#0072B2',   // sky blue, blue
   evOff: '#E69F00', evPeak: '#D55E00',         // orange, vermillion
-  export: '#009E73',                           // bluish green
+  export: '#009E73', exportRate: '#7FD8BE',    // bluish green; its rate line a lighter tint of it
   other: '#F0E442', unsplit: '#999999',        // yellow, grey
   evRate: '#CC79A7',                           // reddish purple; the House / overall rate is the text colour
 };
@@ -312,7 +312,11 @@ export class BillsView {
         line('Rate p/kWh', text, solid(rateLine(k, day, slots, this.data.publishedFor(k)), slots)),
       );
     }
-    if (eday) datasets.push({ ...bar('Export', PALETTE.export, (s) => (eday.get(s) ? -eday.get(s).kwh : null)), stack: 'kwh' });
+    if (eday) {
+      datasets.push({ ...bar('Export', PALETTE.export, (s) => (eday.get(s) ? -eday.get(s).kwh : null)), stack: 'kwh' });
+      const er = exportRateLine(eday, slots);
+      if (slots.some((s) => er.get(s) != null)) datasets.push(line('Export rate p/kWh', dark ? PALETTE.exportRate : '#00684C', er));
+    }
     for (const d of datasets) if (d.type === 'bar' && d.data.every((v) => v == null)) d.hidden = true;
     // The rate axis shares the kWh axis's zero (EMT's _alignY2): with export below zero, the rate
     // axis reaches below zero by the same proportion, and its negative ticks are not labelled.

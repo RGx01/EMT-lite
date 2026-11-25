@@ -62,21 +62,26 @@ export function solid(rates, slots) {
   return out;
 }
 
+// Intelligent Octopus's fixed off-peak window, 23:30–05:30 local: slots 47 and 0–10.
+export const inIogWindow = (slot) => slot >= 47 || slot <= 10;
+
 /**
  * The rate one side of Octopus's IOG-SMB split was charged (design §5.5), p/kWh with VAT:
- * that side's bucket cost ÷ its kWh. Where the side drew nothing, the same side's rate for the
- * half-hour's band that day; then the other side's; then `solid` carries the line on.
+ * that side's bucket cost ÷ its kWh. Where the side drew nothing, the half-hour's band decides:
+ * off-peak if any bucket in it carries off-peak (a dispatch), else off-peak inside IOG's
+ * 23:30–05:30 window, else peak. The rate is then the side's own rate for that band that day, or
+ * the other side's. Not carried on from the half-hour before: after a dispatch ends, a house that
+ * draws nothing is back at peak.
  */
 export function sideRateLine(dayKey, day, slots, side) {
   const v = 1 + vatRate(dayKey);
   const other = side === 'ev' ? 'home' : 'ev';
   const raw = new Map();
   const byBand = { ev: { off: [], peak: [], other: [] }, home: { off: [], peak: [], other: [] } };
-  const bandOf = new Map();
+  const offInSlot = new Set();
   for (const s of slots) {
     const sp = day?.get(s)?.split;
     if (!sp) continue;
-    let carried = null;
     for (const sd of ['ev', 'home']) {
       let k = 0, c = 0;
       for (const band of ['off', 'peak', 'other']) {
@@ -84,20 +89,41 @@ export function sideRateLine(dayKey, day, slots, side) {
         if (e && e.kwh > MIN_KWH) {
           byBand[sd][band].push(e.cost / e.kwh);
           k += e.kwh; c += e.cost;
-          carried = carried ?? band;
+          if (band === 'off') offInSlot.add(s);
         }
       }
       if (sd === side && k > MIN_KWH) raw.set(s, c / k);
     }
-    const iv = day.get(s);
-    bandOf.set(s, carried ?? (iv.offPeak === true ? 'off' : iv.offPeak === false ? 'peak' : null));
   }
   const out = new Map();
   for (const s of slots) {
     let r = raw.get(s) ?? null;
-    const b = bandOf.get(s);
-    if (r == null && b) r = median(byBand[side][b]) ?? median(byBand[other][b]);
+    if (r == null) {
+      const b = offInSlot.has(s) || inIogWindow(s) ? 'off' : 'peak';
+      r = median(byBand[side][b]) ?? median(byBand[other][b]);
+    }
     out.set(s, r == null ? null : r * v);
   }
   return solid(out, slots);
+}
+
+/** The export rate each half-hour, p/kWh (export payments carry no VAT): payment ÷ kWh. A day
+ *  paid at one rate (each payment within 0.5p of it) fills every half-hour; a varying rate carries on
+ *  between readings. */
+export function exportRateLine(day, slots) {
+  const raw = new Map();
+  for (const s of slots) {
+    const iv = day?.get(s);
+    if (iv && iv.costExc != null && iv.kwh > MIN_KWH) raw.set(s, Math.abs(iv.costExc) / iv.kwh);
+  }
+  // Octopus rounds each half-hour's AMOUNT, so a flat rate looks uneven on small exports. If every
+  // half-hour's payment is within half a penny of one rate × its kWh, the day is that rate.
+  let kwh = 0, pay = 0;
+  for (const s of raw.keys()) { const iv = day.get(s); kwh += iv.kwh; pay += Math.abs(iv.costExc); }
+  if (kwh > MIN_KWH) {
+    const r = pay / kwh;
+    const flat = [...raw.keys()].every((s) => { const iv = day.get(s); return Math.abs(Math.abs(iv.costExc) - r * iv.kwh) <= 0.5; });
+    if (flat) return new Map(slots.map((s) => [s, r]));
+  }
+  return solid(raw, slots);
 }
