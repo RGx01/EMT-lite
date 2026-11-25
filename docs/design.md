@@ -45,6 +45,10 @@ Home Assistant's own *Add app repository to My* badge linking to its add-reposit
 the window, carries the same, for narrow screens,
 and a link to this repository's issues, for problems and suggestions.
 
+**Not authoritative.** The bills are worked out from Octopus's half-hourly data and may contain
+mistakes; the customer's Octopus statement is what counts. The sign-in page and every bill card say
+so, with a link to raise an issue (26 Nov 2026).
+
 **Colours** are Okabe–Ito, distinguishable with red-green colour blindness: House off-peak / peak
 sky blue / blue, EV off-peak / peak orange / vermillion, export bluish green, the EV rate reddish
 purple, the House rate the text colour.

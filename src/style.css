@@ -61,6 +61,9 @@ select, input { background: var(--surface); border: 1px solid var(--border); bor
 .bill-rows tr.total th, .bill-rows tr.total td { border-top: 1px solid var(--border); font-weight: 600; }
 .bill-notes { font-size: 13px; padding-left: 18px; margin: 12px 0 0; }
 .bill-notes .warn { color: var(--warn); }
+.bill-notes .caveat { color: var(--muted); font-style: italic; }
+.bill-notes .caveat a, .caveat a { color: var(--accent); }
+.signin .caveat { font-size: 13px; border-left: 3px solid var(--warn); padding-left: 10px; margin-top: 12px; }
 .billing-day { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
 .billing-day p { margin: 0; flex-basis: 100%; }
 .billing-day input { width: 80px; }
