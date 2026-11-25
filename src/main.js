@@ -31,6 +31,13 @@ function showError(msg) {
 
 function status(msg) { $('status').textContent = msg || ''; }
 
+let fuel = 'elec';                     // the heatmap's meter: 'elec' or 'gas'
+function setFuel(f) {
+  fuel = f;
+  for (const b of document.querySelectorAll('#fuel .tab')) b.classList.toggle('active', b.dataset.fuel === f);
+  redraw();
+}
+
 function setTab(t) {
   tab = t;
   for (const b of document.querySelectorAll('#tabs .tab')) b.classList.toggle('active', b.dataset.tab === t);
@@ -48,11 +55,21 @@ function redraw() {
     if (!data) return;
     if (tab === 'bills') bills.render();
     else {
-      renderHeatmap($('heatmap'), {
-        months: data.shownMonths().reverse(),
-        imp: data.impDays, impCover: data.impCover,
-        exp: data.info.export ? data.expDays : null, expCover: data.info.export ? data.expCover : null,
-      });
+      $('fuel').hidden = !data.info.gas;
+      if (fuel === 'gas' && data.info.gas) {
+        // gas: its half-hours only, no export and no bill (design §1)
+        renderHeatmap($('heatmap'), {
+          months: data.shownMonths().reverse(),
+          imp: data.gasDays, impCover: data.gasCover, exp: null, expCover: null,
+          unit: data.gasUnit, what: 'gas',
+        });
+      } else {
+        renderHeatmap($('heatmap'), {
+          months: data.shownMonths().reverse(),
+          imp: data.impDays, impCover: data.impCover,
+          exp: data.info.export ? data.expDays : null, expCover: data.info.export ? data.expCover : null,
+        });
+      }
     }
   });
 }
@@ -81,6 +98,9 @@ async function signOut() {
 
 /** Back to the sign-in page, keeping what this device remembers (after an error). */
 function resetPage() {
+  fuel = 'elec';
+  $('fuel').hidden = true;
+  for (const b of document.querySelectorAll('#fuel .tab')) b.classList.toggle('active', b.dataset.fuel === 'elec');
   octo?.signOut?.();
   bills?.destroyCharts();
   octo = data = bills = null;
@@ -238,6 +258,7 @@ $('more').addEventListener('click', () => {
   loadMonths(monthsToLoad(monthsWanted));
 });
 for (const b of document.querySelectorAll('#tabs .tab')) b.addEventListener('click', () => setTab(b.dataset.tab));
+for (const b of document.querySelectorAll('#fuel .tab')) b.addEventListener('click', () => setFuel(b.dataset.fuel));
 window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', redraw);
 
 // A remembered device signs in with its refresh token.

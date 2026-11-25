@@ -20,7 +20,8 @@ export const ACCOUNT_INFO =
         properties { id electricityMeterPoints { mpan direction
           agreements(includeInactive: true) { validFrom validTo tariff {
             ${TARIFF_TYPES.map(tariff).join(' ')}
-          } } } } } }`;
+          } } }
+        gasMeterPoints { mprn agreements(includeInactive: true) { validFrom validTo } } } } }`;
 
 export const BILLING_TRIGGER =
       `query t($n: String!) { account(accountNumber: $n) { billingTriggerConfiguration { isActive nextIssueDate
@@ -38,6 +39,15 @@ export function measurementsQuery(dir) {
           pageInfo { hasNextPage endCursor } } } } }`;
 }
 
+/** Half-hourly gas readings (the gas heatmap; no costs: gas is not billed here). `unit` says
+ *  whether a reading is m³ or kWh. */
+export const GAS_MEASUREMENTS = `query gas($n: String!, $mprn: String!, $start: DateTime!, $end: DateTime!, $first: Int!, $after: String) {
+      account(accountNumber: $n) { properties {
+        measurements(first: $first, after: $after, startAt: $start, endAt: $end, timezone: "${TZ}",
+          utilityFilters: [{ gasFilters: { readingFrequencyType: THIRTY_MIN_INTERVAL, marketSupplyPointId: $mprn } }]) {
+          edges { node { value unit ... on IntervalMeasurementType { startAt endAt } } }
+          pageInfo { hasNextPage endCursor } } } } }`;
+
 /** Every document, by name, for the schema check. */
 export const ALL_DOCUMENTS = {
   obtainKrakenToken: TOKEN_MUTATION,
@@ -46,4 +56,5 @@ export const ALL_DOCUMENTS = {
   billingTrigger: BILLING_TRIGGER,
   measurementsImport: measurementsQuery('CONSUMPTION'),
   measurementsExport: measurementsQuery('GENERATION'),
+  measurementsGas: GAS_MEASUREMENTS,
 };

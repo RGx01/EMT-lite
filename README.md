@@ -20,7 +20,7 @@ npm run check:kraken  # the page's GraphQL queries against Octopus's live schema
 `npm run dev` serves the source with hot reload but **without** the CSP. Check anything
 security-related with `build` + `preview`.
 
-**Try the demo** on the sign-in page loads a made-up account through the same code a real one uses.
+**Try the demo** on the sign-in page loads a made-up account through the same code a real one uses, gas meter included.
 
 The bills EMT-Lite shows are worked out from Octopus's half-hourly data. They are **not
 authoritative** and may contain mistakes; the customer's Octopus statement is. The page says so on

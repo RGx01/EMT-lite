@@ -520,7 +520,7 @@ describe('cost recovery, in EMT\u2019s order', () => {
 });
 
 
-import { memoryCache, reusable, SETTLE_DAYS, CACHE_SHAPE } from '../src/cache.js';
+import { memoryCache, reusable, SETTLE_DAYS, CACHE_SHAPE, monthKey } from '../src/cache.js';
 
 describe('the device cache', () => {
   const info = { number: 'A-0000ABC7', import: { mpan: '2600000000001', agreements: [], from: null }, export: null, billing: null };
@@ -844,5 +844,64 @@ describe('the clocks-back day: one of a repeated half-hour’s two readings miss
     const c = cellOf(byDay(gappy), cover, exp, cover, k, 2);
     expect(c.hatch).toBe('red');
     expect(c.value).toBeCloseTo(0.5 - 0.2);
+  });
+});
+
+import { parseGasNode, gasUnit } from '../src/measurements.js';
+
+describe('the gas heatmap', () => {
+  const gasInfo = { number: 'A-0000ABC7', import: { mpan: '2600000000001', agreements: [], from: null }, export: null,
+    gas: { mprn: '9000000000', agreements: [], from: null }, billing: null };
+  const sep = { start: '2026-09-01', end: '2026-10-01' };
+  const g = (kwh) => ({ start: midnight('2026-09-01'), kwh, unit: 'm³', costExc: null, standingExc: null, offPeak: null, split: null });
+  const counting = () => {
+    const o = { elec: 0, gas: 0,
+      measurements: async () => { o.elec++; return []; },
+      gasMeasurements: async (_n, mprn, from) => { o.gas++; expect(mprn).toBe('9000000000'); return from === '2026-09-01' ? [g(0.42)] : []; },
+      measurementsBetween: async () => [], publishedRates: async () => [] };
+    return o;
+  };
+
+  it('reads a gas node and its unit', () => {
+    const iv = parseGasNode({ startAt: '2026-09-01T00:00:00+01:00', value: '0.420', unit: 'M3' });
+    expect(iv).toMatchObject({ kwh: 0.42, unit: 'm³', costExc: null });
+    expect([gasUnit('kWh'), gasUnit('m3'), gasUnit(null)]).toEqual(['kWh', 'm³', 'kWh']);
+  });
+  it('describeAccount finds the gas meter point', () => {
+    const acc = { properties: [{ electricityMeterPoints: [{ mpan: '2600000000001', direction: 'IMPORT', agreements: [] }],
+      gasMeterPoints: [{ mprn: '9000000000', agreements: [{ validFrom: '2025-01-01T00:00:00Z', validTo: null }] }] }] };
+    expect(describeAccount('A-0000ABC7', acc).gas).toMatchObject({ mprn: '9000000000', from: '2025-01-01' });
+    expect(describeAccount('A-0000ABC7', { properties: [{ electricityMeterPoints: [] }] }).gas).toBe(null);
+  });
+  it('loads a month’s gas with its electricity, in the reported unit', async () => {
+    const o = counting();
+    const d = new AccountData(o, gasInfo, null);
+    await d.loadMonth(sep);
+    expect(o.gas).toBeGreaterThan(0);
+    expect(d.gasDays.get('2026-09-01').get(0).kwh).toBeCloseTo(0.42);
+    expect(d.gasUnit).toBe('m³');
+  });
+  it('a month cached before gas was loaded asks Octopus for its gas only', async () => {
+    const cache = memoryCache();
+    const key = monthKey(gasInfo, sep);
+    await cache.put(key, { shape: CACHE_SHAPE, fetchedAt: midnight('2026-12-01'), imp: [], exp: [], rates: [] });
+    const o = counting();
+    const d = new AccountData(o, gasInfo, cache);
+    expect(await d.loadMonth(sep)).toBe('device');
+    expect(o.elec).toBe(0);
+    expect(o.gas).toBeGreaterThan(0);
+    expect((await cache.get(key)).gas).toHaveLength(1);
+    const again = counting();
+    await new AccountData(again, gasInfo, cache).loadMonth(sep);
+    expect(again.gas).toBe(0);
+  });
+  it('an account without gas asks for none', async () => {
+    const o = counting();
+    await new AccountData(o, { ...gasInfo, gas: null }, null).loadMonth(sep);
+    expect(o.gas).toBe(0);
+  });
+  it('the day bar speaks of gas in its unit', () => {
+    const d = { net: 12.5, imp: 12.5, exp: 0, missImp: 2, missExp: 0 };
+    expect(dayBarText('2026-11-10', d, false, 'm³', 'gas')).toBe('Tue 10 Nov 2026 · 12.50 m³ · 2 gas half-hours missing');
   });
 });

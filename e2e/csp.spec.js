@@ -43,6 +43,10 @@ test('the demo runs with no CSP violation, no error, and no request to another h
   await page.getByRole('button', { name: 'Heatmap' }).click();
   await expect(page.locator('.hm-month canvas').first()).toBeVisible();
   await page.locator('.hm-month canvas').first().hover();
+  // the demo has a gas meter: its heatmap too
+  await page.getByRole('button', { name: 'Gas' }).click();
+  await expect(page.locator('.hm-legend')).toContainText('kWh');
+  await page.locator('.hm-month canvas').first().hover();
 
   expect(await violations(page)).toEqual([]);
   expect(seen.errors).toEqual([]);

@@ -32,7 +32,16 @@ A web page for an Octopus customer **without Home Assistant**. They paste their 
    differ without red-green colour vision. A finished half-hour with no reading is hatched even
    when it is only late, today included: the heatmap shows what Octopus holds now. Decided
    25 Nov 2026, replacing an Import / Export toggle.
-3. **The House / EV split** on an IOG-SMB tariff: Octopus's own split, from the kWh and cost of
+3. **A gas heatmap** (26 Nov 2026), when the account has a gas meter point
+   (`properties.gasMeterPoints`, the one with an agreement in force):
+   - It is not billed. It has the same grid, in the unit Octopus reports gas in (m³ or kWh, shown
+     as given, not converted).
+   - It has the same hatching for half-hours with no reading, and its own day bars.
+   - The heatmap switches between Electricity and Gas.
+   - Gas is fetched in the same 10-day windows as electricity, with `gasFilters`
+     (`src/queries.js`), and cached with each month. A month cached before gas was loaded fetches
+     its gas once, not its electricity again.
+4. **The House / EV split** on an IOG-SMB tariff: Octopus's own split, from the kWh and cost of
    each of its buckets (EMT's `bucket_side`), as rows on the bill card. A half-hour with a bucket
    label it does not recognise is left unsplit, not guessed, and the card says how many. The day
    charts stack each bucket as its own bar, with a solid rate line for the House and one for the
