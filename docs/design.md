@@ -32,13 +32,22 @@ A web page for an Octopus customer **without Home Assistant**. They paste their 
    differ without red-green colour vision. A finished half-hour with no reading is hatched even
    when it is only late, today included: the heatmap shows what Octopus holds now. Decided
    25 Nov 2026, replacing an Import / Export toggle.
-3. **The House / EV split** on an IOG-SMB tariff: Octopus's own split, from the kWh and cost of
+3. **A gas heatmap** (26 Nov 2026), when the account has a gas meter point
+   (`properties.gasMeterPoints`, the one with an agreement in force):
+   - It is not billed. It has the same grid, in the unit Octopus reports gas in (m³ or kWh, shown
+     as given, not converted).
+   - It has the same hatching for half-hours with no reading, and its own day bars.
+   - It has its own header tab, **Gas Heatmap**, shown only when the account has gas.
+   - Gas is fetched in the same 10-day windows as electricity, with `gasFilters`
+     (`src/queries.js`), and cached with each month. A month cached before gas was loaded fetches
+     its gas once, not its electricity again.
+4. **The House / EV split** on an IOG-SMB tariff: Octopus's own split, from the kWh and cost of
    each of its buckets (EMT's `bucket_side`), as rows on the bill card. A half-hour with a bucket
    label it does not recognise is left unsplit, not guessed, and the card says how many. The day
    charts stack each bucket as its own bar, with a solid rate line for the House and one for the
    EV (§5.5).
 
-**Around the page.** The page's own header bar (EMT-Lite, the account, Bills / Heatmap, Sign out)
+**Around the page.** The page's own header bar (EMT-Lite, the account, Electric Bills / Electric Heatmap / Gas Heatmap, Sign out)
 stays at the top on every view; the bills' bar sticks just under it. On a wide screen the header
 bar also says *Got Home Assistant? Try EMT for a richer experience*, linking EMT on GitHub, with
 Home Assistant's own *Add app repository to My* badge linking to its add-repository page for EMT. The footer bar, always in view at the bottom of
@@ -64,7 +73,13 @@ hatched. Keeping the two apart is the point of the heatmap: hatched squares are 
 can be short.
 
 Local-time rules come from EMT's heatmap: the clocks-forward hour does not exist and is left blank,
-**not** hatched; the repeated clocks-back hour is summed into its slot.
+**not** hatched; the repeated clocks-back hour is summed into its slot. Each slot remembers which UTC
+half-hours it holds. If one of a repeated half-hour's two readings is missing (finished, at or before
+Octopus's latest reading), the slot is **partial** (26 Nov 2026):
+- the half it has still counts
+- the bill counts it as missing
+- the heatmap hatches it as missing on that side
+- its tooltip says one of the two readings is missing
 
 ## 2. The trust model: the key never leaves the browser
 

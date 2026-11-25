@@ -27,6 +27,7 @@ const STANDING_EXC_DAY = 48;  // p/day, ex VAT
 const EXPORT_P = 15;
 
 export const DEMO_NUMBER = 'A-0000ABC7';
+export const DEMO_MPRN = '9000000000';     // a made-up gas meter point
 
 export function demoAccountInfo(today = todayKey()) {
   const { y, m } = parseKey(today);
@@ -37,6 +38,7 @@ export function demoAccountInfo(today = todayKey()) {
     number: DEMO_NUMBER,
     import: { mpan: '2600000000001', agreements: ag(false), from },
     export: { mpan: '2600000000002', agreements: ag(true), from },
+    gas: { mprn: DEMO_MPRN, agreements: [{ validFrom: `${from}T00:00:00+00:00`, validTo: null }], from },
     billing: { day: 14, anchor: addMonths(y, m, 14, today.slice(8) >= '14' ? 0 : -1), months: 1, source: 'demo' },
   };
 }
@@ -79,12 +81,37 @@ function dayIntervals(k, dir, lastMs) {
 }
 
 /** Stands in for Octopus: same methods the loader calls. */
+/** A made-up day of gas, kWh a half-hour: heating mornings and evenings, more in winter, hot
+ *  water all year, and now and then a half-hour the meter missed. */
+function gasDay(k, lastMs) {
+  const r = rng(seedOf(`gas:${k}`));
+  const { m } = parseKey(k);
+  const winter = Math.cos(((m - 1) / 12) * 2 * Math.PI) * 0.5 + 0.5;    // 1 in January … 0 in July
+  const out = [];
+  const end = midnight(addDays(k, 1));
+  for (let t = midnight(k); t < end && t <= lastMs; t += HALF_HOUR) {
+    if (r() < 0.01) continue;
+    const slot = slotOf(t);
+    const heat = (slot >= 12 && slot < 18) || (slot >= 34 && slot < 44) ? winter * (1.5 + r() * 1.5) : 0;
+    const water = slot === 14 || slot === 38 ? 0.8 + r() * 0.6 : 0;
+    out.push({ start: t, kwh: +(heat + water + (r() < 0.1 ? 0.2 : 0)).toFixed(3), unit: 'kWh',
+      costExc: null, standingExc: null, offPeak: null, split: null });
+  }
+  return out;
+}
+
 export class DemoOctopus {
   constructor() { this.lastMs = Date.now() - 26 * 3600 * 1000; }   // readings ~a day behind, as DCC
   async measurements(_n, _mpan, fromKey, toKey, dir) {
     await new Promise((r) => setTimeout(r, 120));
     const out = [];
     for (let k = fromKey; k < toKey; k = addDays(k, 1)) out.push(...dayIntervals(k, dir, this.lastMs));
+    return out;
+  }
+  async gasMeasurements(_n, _mprn, fromKey, toKey) {
+    await new Promise((r) => setTimeout(r, 120));
+    const out = [];
+    for (let k = fromKey; k < toKey; k = addDays(k, 1)) out.push(...gasDay(k, this.lastMs));
     return out;
   }
   async measurementsBetween() { return []; }

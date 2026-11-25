@@ -109,7 +109,9 @@ export function mergeSplit(a, b) {
 
 /**
  * Index intervals by local day and slot. The repeated clocks-back hour's two half-hours land on
- * the same slot and are SUMMED (EMT's heatmap rule); a band that disagrees becomes null.
+ * the same slot and are SUMMED (EMT's heatmap rule); a band that disagrees becomes null. Each slot
+ * keeps `starts`, the UTC instants it holds, so a slot with only one of its two readings can be
+ * told apart (bill.slotState 'partial').
  * Returns Map<dayKey, Map<slot, interval-like>>.
  */
 export function byDay(intervals) {
@@ -119,7 +121,8 @@ export function byDay(intervals) {
     let day = days.get(k);
     if (!day) days.set(k, (day = new Map()));
     const prev = day.get(slot);
-    if (!prev) { day.set(slot, { ...iv, split: iv.split ? structuredClone(iv.split) : null }); continue; }
+    if (!prev) { day.set(slot, { ...iv, split: iv.split ? structuredClone(iv.split) : null, starts: [iv.start] }); continue; }
+    prev.starts.push(iv.start);
     prev.kwh += iv.kwh;
     prev.costExc = prev.costExc == null || iv.costExc == null ? (prev.costExc ?? iv.costExc) : prev.costExc + iv.costExc;
     prev.standingExc = prev.standingExc == null || iv.standingExc == null
@@ -128,4 +131,22 @@ export function byDay(intervals) {
     prev.split = mergeSplit(prev.split, iv.split);
   }
   return days;
+}
+
+/** A gas measurement node → a half-hour: { start, kwh: the reading (in `unit`), unit }. Gas
+ *  carries no costs here (the gas heatmap is not billed), so the cost fields are null. */
+export function parseGasNode(node) {
+  if (!node?.startAt) return null;
+  const start = Date.parse(node.startAt);
+  const v = Number(node.value);
+  if (!Number.isFinite(start) || !Number.isFinite(v)) return null;
+  return { start, kwh: v, unit: gasUnit(node.unit), costExc: null, standingExc: null, offPeak: null, split: null };
+}
+
+/** Octopus's unit for a gas reading, as shown: 'm³' or 'kWh' (anything else as given). */
+export function gasUnit(u) {
+  const s = String(u || '').toLowerCase();
+  if (s.includes('m3') || s.includes('m³') || s.includes('cubic')) return 'm³';
+  if (s.includes('kwh')) return 'kWh';
+  return u ? String(u) : 'kWh';
 }

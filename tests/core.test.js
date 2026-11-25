@@ -520,7 +520,7 @@ describe('cost recovery, in EMT\u2019s order', () => {
 });
 
 
-import { memoryCache, reusable, SETTLE_DAYS, CACHE_SHAPE } from '../src/cache.js';
+import { memoryCache, reusable, SETTLE_DAYS, CACHE_SHAPE, monthKey } from '../src/cache.js';
 
 describe('the device cache', () => {
   const info = { number: 'A-0000ABC7', import: { mpan: '2600000000001', agreements: [], from: null }, export: null, billing: null };
@@ -797,5 +797,118 @@ describe('IOG rate line: a half-hour with no import (no Octopus split)', () => {
   it('without a window (not Intelligent) the line still carries on, as before', () => {
     const l = solid(rateLine(k, day, slots, null, () => 0), slots);
     expect(l.get(41)).toBeCloseTo(5);
+  });
+});
+
+import { repeatedSlots } from '../src/time.js';
+
+describe('the clocks-back day: one of a repeated half-hour’s two readings missing', () => {
+  // 25 Oct 2026: 01:00 and 01:30 happen twice, in BST (00:00Z, 00:30Z) then GMT (01:00Z, 01:30Z).
+  const k = '2026-10-25';
+  const iv = (iso, kwh) => ({ start: Date.parse(iso), kwh, costExc: kwh * 20, standingExc: 0, offPeak: null, split: null });
+  // every half-hour of the day, then drop the GMT 01:00 reading (slot 2's second half)
+  const all = [];
+  for (let t = midnight(k); t < midnight('2026-10-26'); t += HALF_HOUR) all.push(iv(new Date(t).toISOString(), 0.5));
+  const gappy = all.filter((x) => x.start !== Date.parse('2026-10-25T01:00:00Z'));
+  const cover = { from: '2026-01-01', last: midnight('2026-10-26') - HALF_HOUR, now: midnight('2026-10-27') };
+
+  it('only the clocks-back day has repeated slots: 01:00 and 01:30', () => {
+    expect([...repeatedSlots(k)].sort((a, b) => a - b)).toEqual([2, 3]);
+    expect(repeatedSlots('2026-10-24').size).toBe(0);
+    expect(repeatedSlots('2026-03-29').size).toBe(0);      // clocks forward: shorter, nothing twice
+  });
+  it('(guard) both readings there: present, summed', () => {
+    const d = byDay(all);
+    expect(slotState(d, k, 2, cover)).toBe('present');
+    expect(d.get(k).get(2).kwh).toBeCloseTo(1.0);
+  });
+  it('one of the two missing: partial, not present', () => {
+    const d = byDay(gappy);
+    expect(slotState(d, k, 2, cover)).toBe('partial');
+    expect(slotState(d, k, 3, cover)).toBe('present');
+    expect(d.get(k).get(2).kwh).toBeCloseTo(0.5);
+  });
+  it('(guard) the other half not in yet (after the latest reading) is not missing', () => {
+    const early = gappy.filter((x) => x.start < Date.parse('2026-10-25T01:00:00Z'));
+    const c = { ...cover, last: Date.parse('2026-10-25T00:30:00Z') };
+    expect(slotState(byDay(early), k, 2, c)).toBe('present');
+  });
+  it('the bill counts it missing and still adds up the half it has', () => {
+    const s = summarise({ start: k, end: '2026-10-26' }, byDay(gappy), cover);
+    expect(s.missing).toBe(1);
+    expect(s.kwh).toBeCloseTo(49 * 0.5);
+  });
+  it('the heatmap hatches it, and the day bar counts it', () => {
+    const d = byDay(gappy);
+    const c = cellOf(d, cover, null, null, k, 2);
+    expect(c.hatch).toBe('bw');
+    expect(c.value).toBeCloseTo(0.5);
+    const cells = Array.from({ length: 48 }, (_, s) => cellOf(d, cover, null, null, k, s));
+    expect(daySummary(cells).missImp).toBe(1);
+  });
+  it('with export there, a half-missing import is hatched red over the colour', () => {
+    const exp = byDay(all.map((x) => ({ ...x, kwh: 0.1 })));
+    const c = cellOf(byDay(gappy), cover, exp, cover, k, 2);
+    expect(c.hatch).toBe('red');
+    expect(c.value).toBeCloseTo(0.5 - 0.2);
+  });
+});
+
+import { parseGasNode, gasUnit } from '../src/measurements.js';
+
+describe('the gas heatmap', () => {
+  const gasInfo = { number: 'A-0000ABC7', import: { mpan: '2600000000001', agreements: [], from: null }, export: null,
+    gas: { mprn: '9000000000', agreements: [], from: null }, billing: null };
+  const sep = { start: '2026-09-01', end: '2026-10-01' };
+  const g = (kwh) => ({ start: midnight('2026-09-01'), kwh, unit: 'm³', costExc: null, standingExc: null, offPeak: null, split: null });
+  const counting = () => {
+    const o = { elec: 0, gas: 0,
+      measurements: async () => { o.elec++; return []; },
+      gasMeasurements: async (_n, mprn, from) => { o.gas++; expect(mprn).toBe('9000000000'); return from === '2026-09-01' ? [g(0.42)] : []; },
+      measurementsBetween: async () => [], publishedRates: async () => [] };
+    return o;
+  };
+
+  it('reads a gas node and its unit', () => {
+    const iv = parseGasNode({ startAt: '2026-09-01T00:00:00+01:00', value: '0.420', unit: 'M3' });
+    expect(iv).toMatchObject({ kwh: 0.42, unit: 'm³', costExc: null });
+    expect([gasUnit('kWh'), gasUnit('m3'), gasUnit(null)]).toEqual(['kWh', 'm³', 'kWh']);
+  });
+  it('describeAccount finds the gas meter point', () => {
+    const acc = { properties: [{ electricityMeterPoints: [{ mpan: '2600000000001', direction: 'IMPORT', agreements: [] }],
+      gasMeterPoints: [{ mprn: '9000000000', agreements: [{ validFrom: '2025-01-01T00:00:00Z', validTo: null }] }] }] };
+    expect(describeAccount('A-0000ABC7', acc).gas).toMatchObject({ mprn: '9000000000', from: '2025-01-01' });
+    expect(describeAccount('A-0000ABC7', { properties: [{ electricityMeterPoints: [] }] }).gas).toBe(null);
+  });
+  it('loads a month’s gas with its electricity, in the reported unit', async () => {
+    const o = counting();
+    const d = new AccountData(o, gasInfo, null);
+    await d.loadMonth(sep);
+    expect(o.gas).toBeGreaterThan(0);
+    expect(d.gasDays.get('2026-09-01').get(0).kwh).toBeCloseTo(0.42);
+    expect(d.gasUnit).toBe('m³');
+  });
+  it('a month cached before gas was loaded asks Octopus for its gas only', async () => {
+    const cache = memoryCache();
+    const key = monthKey(gasInfo, sep);
+    await cache.put(key, { shape: CACHE_SHAPE, fetchedAt: midnight('2026-12-01'), imp: [], exp: [], rates: [] });
+    const o = counting();
+    const d = new AccountData(o, gasInfo, cache);
+    expect(await d.loadMonth(sep)).toBe('device');
+    expect(o.elec).toBe(0);
+    expect(o.gas).toBeGreaterThan(0);
+    expect((await cache.get(key)).gas).toHaveLength(1);
+    const again = counting();
+    await new AccountData(again, gasInfo, cache).loadMonth(sep);
+    expect(again.gas).toBe(0);
+  });
+  it('an account without gas asks for none', async () => {
+    const o = counting();
+    await new AccountData(o, { ...gasInfo, gas: null }, null).loadMonth(sep);
+    expect(o.gas).toBe(0);
+  });
+  it('the day bar speaks of gas in its unit', () => {
+    const d = { net: 12.5, imp: 12.5, exp: 0, missImp: 2, missExp: 0 };
+    expect(dayBarText('2026-11-10', d, false, 'm³', 'gas')).toBe('Tue 10 Nov 2026 · 12.50 m³ · 2 gas half-hours missing');
   });
 });

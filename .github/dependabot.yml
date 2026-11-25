@@ -22,3 +22,8 @@ updates:
       interval: "weekly"
     commit-message:
       prefix: "ci"
+    # Every step of one action moves together: CodeQL refuses a run whose init and analyze
+    # steps are different versions, so separate bumps each failed their PR's check.
+    groups:
+      actions:
+        patterns: ["*"]

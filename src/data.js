@@ -63,6 +63,13 @@ export function describeAccount(number, acc, today = todayKey()) {
   const exports = points.filter(isExportPoint);
   const pick = (list) => list.find(live) || list[0] || null;
   const imp = pick(imports), exp = pick(exports);
+  // Gas (the gas heatmap only): the meter point with an agreement in force, else the first.
+  const gasPoints = (acc?.properties || []).flatMap((p) => p.gasMeterPoints || []).filter((g) => g?.mprn);
+  const gp = gasPoints.find(live) || gasPoints[0] || null;
+  const gas = gp ? (() => {
+    const ags = (gp.agreements || []).slice().sort((a, b) => String(a.validFrom).localeCompare(String(b.validFrom)));
+    return { mprn: gp.mprn, agreements: ags, from: dateKey(ags[0]?.validFrom) };
+  })() : null;
 
   // The billing day (design §5.2): Octopus's periodStartDay. currentBillingPeriodStartDate is
   // not used: on the first real account it was the statement cycle's date, not the billing day.
@@ -71,7 +78,7 @@ export function describeAccount(number, acc, today = todayKey()) {
     * Math.max(1, Number(bo.periodLengthMultiplier) || 1);
   const billing = bo.periodStartDay ? billingFromDay(bo.periodStartDay, 'octopus', today, months) : null;
   const vat = accountVat(acc?.accountType, imp ? meterOf(imp).agreements : [], now);
-  return { number, import: imp && meterOf(imp), export: exp && meterOf(exp), billing, vat };
+  return { number, import: imp && meterOf(imp), export: exp && meterOf(exp), gas, billing, vat };
 }
 
 export const DEFAULT_BILLING_DAY = 1;
@@ -120,6 +127,7 @@ export class AccountData {
     this.cache = cache;           // the device cache (design §6), or null: Remember me off, or the demo
     this.imp = [];
     this.exp = [];
+    this.gas = [];                // gas half-hours (the gas heatmap), when the account has gas
     this.published = new Map();   // slot start ms → p/kWh exc VAT (Agile)
     this.loaded = [];             // month starts loaded
     this._rebuild();
@@ -132,6 +140,13 @@ export class AccountData {
     const li = lastOf(this.imp), le = lastOf(this.exp);
     this.impCover = { from: this.info.import?.from || null, last: Number.isFinite(li) ? li : null };
     this.expCover = { from: this.info.export?.from || null, last: Number.isFinite(le) ? le : null };
+    this.gasDays = this.info.gas ? byDay(this.gas) : null;
+    const lg = lastOf(this.gas);
+    this.gasCover = { from: this.info.gas?.from || null, last: Number.isFinite(lg) ? lg : null };
+    // the unit Octopus reports gas in (m³ or kWh): the most common one loaded
+    const units = new Map();
+    for (const g of this.gas) units.set(g.unit, (units.get(g.unit) || 0) + 1);
+    this.gasUnit = [...units].sort((a, b) => b[1] - a[1])[0]?.[0] || 'kWh';
   }
 
   /** The import tariff in force on a day (its agreement at local noon), or null. */
@@ -158,18 +173,32 @@ export class AccountData {
     const key = monthKey(this.info, month);
     const kept = this.cache ? await this.cache.get(key) : null;
     if (reusable(kept, month)) {
-      this._add(month, kept.imp || [], kept.exp || [], kept.rates || []);
+      // a month cached before gas was loaded: ask Octopus for its gas only, and keep it with the rest
+      if (this.info.gas && !Array.isArray(kept.gas)) {
+        kept.gas = await this._fetchGas(month);
+        await this.cache?.put(key, kept);
+      }
+      this._add(month, kept.imp || [], kept.exp || [], kept.rates || [], kept.gas || []);
       return 'device';
     }
     const fresh = await this._fetchMonth(month);
     await this.cache?.put(key, { shape: CACHE_SHAPE, fetchedAt: Date.now(), ...fresh });
-    this._add(month, fresh.imp, fresh.exp, fresh.rates);
+    this._add(month, fresh.imp, fresh.exp, fresh.rates, fresh.gas);
     return 'octopus';
   }
 
-  _add(month, imp, exp, rates) {
+  /** A month's gas half-hours, in the same 10-day windows as electricity, or [] without gas. */
+  async _fetchGas(month) {
+    const g = this.info.gas;
+    if (!g) return [];
+    const windows = dayWindows(month.start, month.end, WINDOW_DAYS);
+    return (await Promise.all(windows.map((w) => this.octo.gasMeasurements(this.info.number, g.mprn, w.start, w.end)))).flat();
+  }
+
+  _add(month, imp, exp, rates, gas = []) {
     this.imp.push(...imp);
     if (this.info.export) this.exp.push(...exp);
+    if (this.info.gas) this.gas.push(...gas);
     for (const r of rates) {
       for (let s = r.from; s < Math.min(r.to ?? Infinity, midnight(month.end)); s += HALF_HOUR) this.published.set(s, r.exc);
     }
@@ -193,10 +222,10 @@ export class AccountData {
       return { got, rates };
     })() : Promise.resolve(null);
     const exporting = this.info.export ? fetchAll(this.info.export.mpan, 'GENERATION') : Promise.resolve(null);
-    const [i, e] = await Promise.all([importing, exporting]);
+    const [i, e, gas] = await Promise.all([importing, exporting, this._fetchGas(month)]);
     // nothing is added until the whole month is in, so a month is never half shown. A rate's
     // open end (Infinity) is stored as null: IndexedDB keeps it, but plainly.
-    return { imp: i?.got || [], exp: e || [], rates: (i?.rates || []).map((r) => ({ ...r, to: Number.isFinite(r.to) ? r.to : null })) };
+    return { imp: i?.got || [], exp: e || [], gas, rates: (i?.rates || []).map((r) => ({ ...r, to: Number.isFinite(r.to) ? r.to : null })) };
   }
 
   /** The months to show: the unbroken run of loaded months back from this one. Months load

@@ -80,6 +80,41 @@ export function slotsOfDay(k) {
   return s;
 }
 
+/** The UTC instants on day `k` whose local slot is `slot`: one, or two for the repeated
+ *  clocks-back half-hours (01:00 and 01:30 in BST, then again in GMT), or none when skipped. */
+export function instantsOf(k, slot) {
+  return instantsByDay(k).get(slot) || [];
+}
+
+const _instantsCache = new Map();
+/** Day `k`'s instants by slot, worked out once per day (the heatmap asks for every half-hour). */
+function instantsByDay(k) {
+  let m = _instantsCache.get(k);
+  if (m) return m;
+  m = new Map();
+  const end = midnight(addDays(k, 1));
+  for (let t = midnight(k); t < end; t += HALF_HOUR) {
+    const s = slotOf(t);
+    if (!m.has(s)) m.set(s, []);
+    m.get(s).push(t);
+  }
+  _instantsCache.set(k, m);
+  return m;
+}
+
+const _repeatedCache = new Map();
+/** The slots that happen twice on day `k`: 01:00 and 01:30 on the clocks-back day, none otherwise.
+ *  Most days are 48 half-hours long, which settles it without a look at any instant. */
+export function repeatedSlots(k) {
+  let r = _repeatedCache.get(k);
+  if (r) return r;
+  const n = Math.round((midnight(addDays(k, 1)) - midnight(k)) / HALF_HOUR);
+  r = new Set();
+  if (n > 48) for (const [s, ts] of instantsByDay(k)) if (ts.length > 1) r.add(s);
+  _repeatedCache.set(k, r);
+  return r;
+}
+
 /** Every day key from `a` to `b`, `b` excluded. */
 export function daysBetween(a, b) {
   const out = [];

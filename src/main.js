@@ -35,7 +35,7 @@ function setTab(t) {
   tab = t;
   for (const b of document.querySelectorAll('#tabs .tab')) b.classList.toggle('active', b.dataset.tab === t);
   $('view-bills').hidden = t !== 'bills';
-  $('view-heatmap').hidden = t !== 'heatmap';
+  $('view-heatmap').hidden = t !== 'heatmap' && t !== 'gas';   // both heatmaps draw in one place
   redraw();
 }
 
@@ -48,11 +48,20 @@ function redraw() {
     if (!data) return;
     if (tab === 'bills') bills.render();
     else {
-      renderHeatmap($('heatmap'), {
-        months: data.shownMonths().reverse(),
-        imp: data.impDays, impCover: data.impCover,
-        exp: data.info.export ? data.expDays : null, expCover: data.info.export ? data.expCover : null,
-      });
+      if (tab === 'gas' && data.info.gas) {
+        // gas: its half-hours only, no export and no bill (design §1)
+        renderHeatmap($('heatmap'), {
+          months: data.shownMonths().reverse(),
+          imp: data.gasDays, impCover: data.gasCover, exp: null, expCover: null,
+          unit: data.gasUnit, what: 'gas',
+        });
+      } else {
+        renderHeatmap($('heatmap'), {
+          months: data.shownMonths().reverse(),
+          imp: data.impDays, impCover: data.impCover,
+          exp: data.info.export ? data.expDays : null, expCover: data.info.export ? data.expCover : null,
+        });
+      }
     }
   });
 }
@@ -81,6 +90,8 @@ async function signOut() {
 
 /** Back to the sign-in page, keeping what this device remembers (after an error). */
 function resetPage() {
+  $('tab-gas').hidden = true;
+  if (tab === 'gas') setTab('bills');
   octo?.signOut?.();
   bills?.destroyCharts();
   octo = data = bills = null;
@@ -122,6 +133,7 @@ async function start(o, info) {
   // the device cache only when the user asked to be remembered, and never for the demo
   const cache = keep && info.number !== DEMO_NUMBER ? deviceCache() : null;
   data = new AccountData(o, info, cache);
+  $('tab-gas').hidden = !info.gas;            // Gas Heatmap only for an account with a gas meter
   bills = new BillsView($('view-bills'), data, {
     // A day the user chooses holds for this visit, and is remembered with the account when the
     // browser is remembering it (design §4.4).
