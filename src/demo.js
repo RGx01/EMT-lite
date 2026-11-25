@@ -37,7 +37,7 @@ export function demoAccountInfo(today = todayKey()) {
     number: DEMO_NUMBER,
     import: { mpan: '2600000000001', agreements: ag(false), from },
     export: { mpan: '2600000000002', agreements: ag(true), from },
-    billing: { anchor: addMonths(y, m, 14, today.slice(8) >= '14' ? 0 : -1), months: 1, source: 'demo' },
+    billing: { day: 14, anchor: addMonths(y, m, 14, today.slice(8) >= '14' ? 0 : -1), months: 1, source: 'demo' },
   };
 }
 

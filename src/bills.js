@@ -5,12 +5,21 @@ import {
   Chart, BarController, BarElement, LineController, LineElement, PointElement,
   LinearScale, CategoryScale, Tooltip, Legend,
 } from 'chart.js';
-import { billPeriods, calendarPeriods, previousOf, lastYearOf, periodLabel, periodsFromStatements } from './periods.js';
+import { billPeriods, calendarPeriods, previousOf, lastYearOf, periodLabel } from './periods.js';
 import { summarise, pounds } from './bill.js';
-import { rateLine } from './rates.js';
+import { rateLine, solid, sideRateLine } from './rates.js';
 import { daysBetween, slotsOfDay, todayKey, parseKey, addDays } from './time.js';
 
 Chart.register(BarController, BarElement, LineController, LineElement, PointElement, LinearScale, CategoryScale, Tooltip, Legend);
+
+// Okabe–Ito: distinguishable with red-green colour blindness. Off-peak is the lighter of each pair.
+const PALETTE = {
+  houseOff: '#56B4E9', housePeak: '#0072B2',   // sky blue, blue
+  evOff: '#E69F00', evPeak: '#D55E00',         // orange, vermillion
+  export: '#009E73',                           // bluish green
+  other: '#F0E442', unsplit: '#999999',        // yellow, grey
+  evRate: '#CC79A7',                           // reddish purple; the House / overall rate is the text colour
+};
 
 const MODES = [['bill', 'Bill'], ['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year']];
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -31,6 +40,8 @@ export class BillsView {
     this.onBillingDay = onBillingDay;
     this.mode = data.info.billing ? 'bill' : 'month';
     this.sel = null;
+    this.prompt = null;          // the billing-day form, while open: { value, focus }
+    this.evidenceOpen = false;
     this.charts = [];
     this.observer = null;
   }
@@ -40,11 +51,7 @@ export class BillsView {
     if (this.mode === 'bill') {
       const b = this.data.info.billing;
       if (!b) return [];
-      if (b.statements) {
-        const ps = periodsFromStatements(b.statements, b.options, first, last);
-        if (ps.length) return ps;
-      }
-      return b.anchor ? billPeriods(b.anchor, b.months, first, last) : [];
+      return billPeriods(b.anchor, b.months, first, last);
     }
     return calendarPeriods(this.mode, first, last);
   }
@@ -62,10 +69,6 @@ export class BillsView {
     }
     this.root.append(bar);
 
-    if (this.mode === 'bill' && !this.data.info.billing) {
-      this.root.append(this.billingDayPrompt());
-      return;
-    }
     if (!list.length) { this.root.append(el('p', 'muted', 'No data loaded yet.')); return; }
 
     let idx = list.findIndex((p) => p.start === this.sel);
@@ -84,8 +87,7 @@ export class BillsView {
     next.addEventListener('click', () => { this.sel = list[idx + 1].start; this.render(); });
     const select = el('select');
     list.forEach((q, i) => {
-      const tag = this.mode === 'bill' && q.current ? ' (current)' : this.mode === 'bill' && q.estimated ? ' (estimated)' : '';
-      const o = el('option', null, periodLabel(q, this.mode) + tag);
+      const o = el('option', null, periodLabel(q, this.mode));
       o.value = q.start;
       if (i === idx) o.selected = true;
       select.append(o);
@@ -94,14 +96,21 @@ export class BillsView {
     nav.append(prev, select, next);
     if (this.mode === 'bill') {
       const src = this.data.info.billing.source;
-      const why = src === 'statements' ? 'periods from your Octopus statements' : src === 'octopus' ? 'billing day from Octopus'
-        : src === 'demo' ? 'demo billing day' : 'billing day you entered';
+      const nth = ordinal(this.data.info.billing.day);
+      const why = src === 'octopus' ? `billing day ${nth}, from Octopus` : src === 'trigger' ? `billing day ${nth}, from Octopus’s billing trigger`
+        : src === 'demo' ? `demo billing day ${nth}` : src === 'user' ? `billing day ${nth}, your choice`
+        : `billing day ${nth}: Octopus does not say, so the 1st`;
       const change = el('button', 'link', `${why} · change`);
       change.type = 'button';
-      change.addEventListener('click', () => { this.root.append(this.billingDayPrompt()); });
+      change.addEventListener('click', () => {
+        this.prompt = { value: String(this.data.info.billing?.day ?? 1), focus: true };
+        nav.after(this.billingDayPrompt());
+      });
       nav.append(change);
     }
     this.root.append(nav);
+    // a redraw (each month that loads) keeps an open form and fold-out as they were
+    if (this.mode === 'bill' && this.prompt) nav.after(this.billingDayPrompt());
     if (this.mode === 'bill' && this.data.info.evidence) this.root.append(this.evidence());
 
     const d = this.data;
@@ -111,45 +120,56 @@ export class BillsView {
     this.root.append(this.days(p));
   }
 
-  /** What Octopus said about billing, so a wrong period can be traced to its source. */
+  /** What Octopus holds about billing, so the billing day can be traced to its source. */
   evidence() {
-    const { options: o, bills: bs } = this.data.info.evidence;
+    const { options: o, trigger: t, payments: ps = [], bills: bs = [] } = this.data.info.evidence;
     const box = el('details', 'evidence');
+    box.open = !!this.evidenceOpen;
+    box.addEventListener('toggle', () => { this.evidenceOpen = box.open; });
     box.append(el('summary', null, 'What Octopus says about your billing'));
     const lines = el('ul');
-    if (o) {
-      lines.append(el('li', null, `Billing options: start day ${o.periodStartDay ?? '—'}, ${String(o.periodLength ?? '—').toLowerCase()}`
-        + ` × ${o.periodLengthMultiplier ?? 1}${o.isFixed ? ', fixed' : ''}`));
-      lines.append(el('li', null, `Current period: ${o.currentBillingPeriodStartDate ?? '—'} to ${o.currentBillingPeriodEndDate ?? '—'}`
-        + ` · next bill ${o.nextBillingDate ?? '—'}`));
+    const li = (text) => lines.append(el('li', null, text));
+    li(o ? `Billing options: start day ${o.periodStartDay ?? 'not set'}, ${String(o.periodLength ?? '—').toLowerCase()}`
+      + `; current period from ${o.currentBillingPeriodStartDate ?? '—'}` : 'Billing options: none');
+    if (t?.error) {
+      li(`Billing trigger: could not be read (${t.error})`);
+    } else if (t) {
+      const fs = (t.operationFrequencies || []).map((f) => `${String(f.operationType).toLowerCase()} ${String(f.frequency).toLowerCase()}`
+        + ` on day ${f.triggerAtStartDay}`);
+      li(`Billing trigger${t.isActive === false ? ' (inactive)' : ''}: ${fs.join('; ') || 'no frequencies'}; next issue ${t.nextIssueDate ?? '—'}`);
     } else {
-      lines.append(el('li', null, 'No billing options.'));
+      li('Billing trigger: none');
     }
-    if (bs.length) {
-      for (const b of bs.slice(0, 6)) {
-        lines.append(el('li', null, `${String(b.billType || 'Bill').toLowerCase()}: ${b.fromDate} to ${b.toDate ?? '—'}`
-          + `${b.issuedDate ? `, issued ${b.issuedDate}` : ''}`));
-      }
-    } else {
-      lines.append(el('li', null, 'No bills returned.'));
-    }
+    for (const p of ps) li(`Payment schedule: day ${p.paymentDay ?? '—'}, ${String(p.paymentFrequency ?? '').toLowerCase()} (not used as the billing day)`);
+    for (const b of bs.slice(0, 3)) li(`${String(b.billType || 'Bill').toLowerCase()}: ${b.fromDate} to ${b.toDate ?? '—'}`);
     box.append(lines);
     return box;
   }
 
   billingDayPrompt() {
+    this.root.querySelector('.billing-day')?.remove();
     const box = el('form', 'billing-day');
-    box.append(el('p', null, 'Octopus did not say which day your bill starts. Enter it to see bill periods.'));
+    box.append(el('p', null, 'Which day of the month does your bill start? Bill periods run from that day to the day before it next month.'));
     const input = el('input');
     input.type = 'number'; input.min = '1'; input.max = '31'; input.required = true;
+    input.value = this.prompt?.value ?? String(this.data.info.billing?.day ?? 1);
     input.setAttribute('aria-label', 'Billing day of the month');
-    const ok = el('button', null, 'Use this day');
+    input.addEventListener('input', () => { if (this.prompt) this.prompt.value = input.value; });
+    input.addEventListener('focus', () => { if (this.prompt) this.prompt.focus = true; });
+    input.addEventListener('blur', () => { if (this.prompt) this.prompt.focus = false; });
+    if (this.prompt?.focus) requestAnimationFrame(() => input.focus());
+    const ok = el('button', 'primary', 'Use this day');
     ok.type = 'submit';
-    box.append(input, ok);
+    const cancel = el('button', null, 'Cancel');
+    cancel.type = 'button';
+    cancel.addEventListener('click', () => { this.prompt = null; box.remove(); });
+    box.append(input, ok, cancel);
     box.addEventListener('submit', (e) => {
       e.preventDefault();
+      this.prompt = null;
       this.onBillingDay(Number(input.value));
       this.mode = 'bill';
+      this.sel = null;
       this.render();
     });
     return box;
@@ -157,8 +177,7 @@ export class BillsView {
 
   card(p, s, sp, sy) {
     const card = el('section', 'bill-card');
-    card.append(el('h2', null, periodLabel(p, this.mode)
-      + (this.mode === 'bill' && p.estimated && !p.current ? ' · estimated period, no statement' : '')));
+    card.append(el('h2', null, periodLabel(p, this.mode)));
     const big = el('div', 'bill-total');
     big.append(el('span', 'amount', pounds(s.net)), el('span', 'muted', s.exportKwh ? ' after export' : ' total'));
     card.append(big);
@@ -255,32 +274,71 @@ export class BillsView {
     const slots = [...slotsOfDay(k)].sort((a, b) => a - b);
     const day = this.data.impDays.get(k);
     const eday = this.data.expDays?.get(k);
-    const rates = rateLine(k, day, slots, this.data.publishedFor(k));
     const dark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
     const grid = dark ? '#2a2d3a' : '#e5e7eb', text = dark ? '#c9ccd6' : '#444';
-    const datasets = [{
-      type: 'bar', label: 'Import kWh', yAxisID: 'kwh', order: 2,
-      data: slots.map((s) => day?.get(s)?.kwh ?? null),
-      backgroundColor: slots.map((s) => (day?.get(s)?.offPeak === true ? '#2e9e5b' : '#3b6fd8')),
-    }];
-    if (eday) {
-      datasets.push({ type: 'bar', label: 'Export kWh', yAxisID: 'kwh', order: 3,
-        data: slots.map((s) => (eday.get(s) ? -eday.get(s).kwh : null)), backgroundColor: '#e0a020' });
+    const iv = (s) => day?.get(s);
+    const bar = (label, color, value) => ({ type: 'bar', label, yAxisID: 'kwh', order: 2, stack: 'kwh',
+      backgroundColor: color, data: slots.map(value) });
+    const line = (label, color, rates) => ({ type: 'line', label, yAxisID: 'rate', order: 1,
+      data: slots.map((s) => rates.get(s)), stepped: 'middle', borderColor: color, borderWidth: 2,
+      pointRadius: 0, spanGaps: true, borderDash: [] });
+    const datasets = [];
+    const split = slots.some((s) => iv(s)?.split);
+    if (split) {
+      // Octopus's IOG-SMB House/EV split, each bucket a bar; a half-hour not split yet is one bar
+      const part = (key) => (s) => { const e = iv(s)?.split?.[key]; return e && e.kwh > 0 ? e.kwh : null; };
+      datasets.push(
+        bar('House off-peak', PALETTE.houseOff, part('home:off')),
+        bar('House peak', PALETTE.housePeak, part('home:peak')),
+        bar('EV off-peak', PALETTE.evOff, part('ev:off')),
+        bar('EV peak', PALETTE.evPeak, part('ev:peak')),
+      );
+      if (slots.some((s) => (iv(s)?.split?.['ev:other']?.kwh || 0) + (iv(s)?.split?.['home:other']?.kwh || 0) > 0)) {
+        datasets.push(bar('Other bucket', PALETTE.other,
+          (s) => ((iv(s)?.split?.['ev:other']?.kwh || 0) + (iv(s)?.split?.['home:other']?.kwh || 0)) || null));
+      }
+      if (slots.some((s) => iv(s) && !iv(s).split)) {
+        datasets.push(bar('Not split yet', PALETTE.unsplit, (s) => (iv(s) && !iv(s).split ? iv(s).kwh : null)));
+      }
+      datasets.push(line('House rate p/kWh', text, sideRateLine(k, day, slots, 'home')));
+      if (slots.some((s) => (iv(s)?.split?.['ev:off']?.kwh || 0) + (iv(s)?.split?.['ev:peak']?.kwh || 0) > 0)) {
+        // wider and beneath the House line: where the two rates are the same, it shows as an edge
+        datasets.push({ ...line('EV rate p/kWh', PALETTE.evRate, sideRateLine(k, day, slots, 'ev')), order: 1.5, borderWidth: 6 });
+      }
+    } else {
+      datasets.push(
+        bar('Import off-peak', PALETTE.houseOff, (s) => (iv(s)?.offPeak === true ? iv(s).kwh : null)),
+        bar('Import peak', PALETTE.housePeak, (s) => (iv(s) && iv(s).offPeak !== true ? iv(s).kwh : null)),
+        line('Rate p/kWh', text, solid(rateLine(k, day, slots, this.data.publishedFor(k)), slots)),
+      );
     }
-    datasets.push({
-      type: 'line', label: 'Rate p/kWh', yAxisID: 'rate', order: 1,
-      data: slots.map((s) => rates.get(s)), stepped: 'middle', borderColor: '#cc0000', borderWidth: 1.5,
-      pointRadius: 0, spanGaps: false,
+    if (eday) datasets.push({ ...bar('Export', PALETTE.export, (s) => (eday.get(s) ? -eday.get(s).kwh : null)), stack: 'kwh' });
+    for (const d of datasets) if (d.type === 'bar' && d.data.every((v) => v == null)) d.hidden = true;
+    // The rate axis shares the kWh axis's zero (EMT's _alignY2): with export below zero, the rate
+    // axis reaches below zero by the same proportion, and its negative ticks are not labelled.
+    let kMin = 0, kMax = 0;
+    slots.forEach((_, i) => {
+      let pos = 0, neg = 0;
+      for (const d of datasets) if (d.type === 'bar' && !d.hidden) { const v = d.data[i] || 0; if (v > 0) pos += v; else neg += v; }
+      kMax = Math.max(kMax, pos); kMin = Math.min(kMin, neg);
     });
+    const up = (v, step) => Math.max(step, Math.ceil((v - 1e-9) / step) * step);
+    const rMax = up(Math.max(1, ...datasets.filter((d) => d.type === 'line').flatMap((d) => d.data.filter((v) => v != null))) * 1.05, 5);
+    kMax = up(kMax * 1.05, 0.5);
+    kMin = kMin < 0 ? -up(-kMin * 1.05, 0.5) : 0;
+    const rMin = rMax * (kMin / kMax);
+
     const chart = new Chart(box.querySelector('canvas'), {
-      data: { labels: slots.map(fmtSlot), datasets },
+      data: { labels: slots.map(fmtSlot), datasets: datasets.filter((d) => !(d.type === 'bar' && d.hidden)) },
       options: {
         animation: false, responsive: true, maintainAspectRatio: false,
         interaction: { mode: 'index', intersect: false },
         scales: {
           x: { stacked: true, ticks: { color: text, maxRotation: 0, autoSkip: true, maxTicksLimit: 12 }, grid: { color: grid } },
-          kwh: { position: 'left', stacked: true, title: { display: true, text: 'kWh', color: text }, ticks: { color: text }, grid: { color: grid } },
-          rate: { position: 'right', beginAtZero: true, title: { display: true, text: 'p/kWh', color: text }, ticks: { color: text }, grid: { display: false } },
+          kwh: { position: 'left', stacked: true, min: kMin, max: kMax,
+            title: { display: true, text: 'kWh', color: text }, ticks: { color: text, stepSize: 0.5 }, grid: { color: grid } },
+          rate: { position: 'right', min: rMin, max: rMax, title: { display: true, text: 'p/kWh', color: text },
+            ticks: { color: text, stepSize: 5, callback: (v) => (v < 0 || Math.abs(v % 5) > 1e-6 ? '' : v) }, grid: { display: false } },
         },
         plugins: {
           legend: { labels: { color: text, boxWidth: 12 } },
@@ -299,3 +357,9 @@ export class BillsView {
   }
 }
 
+
+function ordinal(n) {
+  const v = n % 100;
+  const suf = v >= 11 && v <= 13 ? 'th' : ({ 1: 'st', 2: 'nd', 3: 'rd' }[n % 10] || 'th');
+  return `${n}${suf}`;
+}

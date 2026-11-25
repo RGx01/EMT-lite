@@ -18,7 +18,8 @@ import { vatRate } from './vat.js';
 export function slotState(days, dayKey, slot, cover) {
   if (days.get(dayKey)?.has(slot)) return 'present';
   const now = cover.now ?? Date.now(), today = dayKeyOf(now);
-  if (dayKey > today || (dayKey === today && slot > slotOf(now))) return 'future';
+  // the half-hour in progress has not finished: it is future too
+  if (dayKey > today || (dayKey === today && slot >= slotOf(now))) return 'future';
   if (cover.from && dayKey < cover.from) return 'outside';
   if (cover.last == null) return 'pending';
   const lastDay = dayKeyOf(cover.last);

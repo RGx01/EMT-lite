@@ -150,6 +150,26 @@ export class Octopus {
     return d.account || null;
   }
 
+  /** Kraken's billing trigger: the day of the month billing runs, if the account has one. */
+  async billingTrigger(number) {
+    const d = await this.gql(
+      `query t($n: String!) { account(accountNumber: $n) { billingTriggerConfiguration { isActive nextIssueDate
+        operationFrequencies { operationType targetType frequency multiplier triggerAtStartDay triggerAtStartMonth } } } }`,
+      { n: number },
+    );
+    return d.account?.billingTriggerConfiguration || null;
+  }
+
+  /** Active payment schedules (the Direct Debit day): shown, never taken as the billing day. */
+  async paymentSchedules(number) {
+    const d = await this.gql(
+      `query p($n: String!) { account(accountNumber: $n) { paymentSchedules(first: 5, active: true) { edges { node {
+        paymentDay paymentFrequency paymentFrequencyMultiplier validFrom validTo } } } } }`,
+      { n: number },
+    );
+    return (d.account?.paymentSchedules?.edges || []).map((e) => e.node).filter(Boolean);
+  }
+
   /** The account's recent bills, newest first: [{ fromDate, toDate, issuedDate, billType }]. */
   async recentBills(number) {
     const d = await this.gql(

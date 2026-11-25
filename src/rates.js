@@ -46,3 +46,58 @@ export function rateLine(dayKey, day, slots, published = null) {
   }
   return out;
 }
+
+/** Fill a rate map's gaps so the line is continuous: each gap takes the rate before it, and a
+ *  leading gap the first rate after it. A day with no rate at all stays empty. */
+export function solid(rates, slots) {
+  const out = new Map();
+  let last = null;
+  for (const s of slots) {
+    const r = rates.get(s);
+    if (r != null) last = r;
+    out.set(s, last);
+  }
+  const first = slots.map((s) => out.get(s)).find((r) => r != null) ?? null;
+  for (const s of slots) if (out.get(s) == null) out.set(s, first);
+  return out;
+}
+
+/**
+ * The rate one side of Octopus's IOG-SMB split was charged (design §5.5), p/kWh with VAT:
+ * that side's bucket cost ÷ its kWh. Where the side drew nothing, the same side's rate for the
+ * half-hour's band that day; then the other side's; then `solid` carries the line on.
+ */
+export function sideRateLine(dayKey, day, slots, side) {
+  const v = 1 + vatRate(dayKey);
+  const other = side === 'ev' ? 'home' : 'ev';
+  const raw = new Map();
+  const byBand = { ev: { off: [], peak: [], other: [] }, home: { off: [], peak: [], other: [] } };
+  const bandOf = new Map();
+  for (const s of slots) {
+    const sp = day?.get(s)?.split;
+    if (!sp) continue;
+    let carried = null;
+    for (const sd of ['ev', 'home']) {
+      let k = 0, c = 0;
+      for (const band of ['off', 'peak', 'other']) {
+        const e = sp[`${sd}:${band}`];
+        if (e && e.kwh > MIN_KWH) {
+          byBand[sd][band].push(e.cost / e.kwh);
+          k += e.kwh; c += e.cost;
+          carried = carried ?? band;
+        }
+      }
+      if (sd === side && k > MIN_KWH) raw.set(s, c / k);
+    }
+    const iv = day.get(s);
+    bandOf.set(s, carried ?? (iv.offPeak === true ? 'off' : iv.offPeak === false ? 'peak' : null));
+  }
+  const out = new Map();
+  for (const s of slots) {
+    let r = raw.get(s) ?? null;
+    const b = bandOf.get(s);
+    if (r == null && b) r = median(byBand[side][b]) ?? median(byBand[other][b]);
+    out.set(s, r == null ? null : r * v);
+  }
+  return solid(out, slots);
+}

@@ -1,8 +1,6 @@
 import { Octopus } from './octopus.js';
-import { AccountData, describeAccount, monthsToLoad, DEFAULT_MONTHS } from './data.js';
-import { anchorFromBillingDay } from './periods.js';
-import { todayKey } from './time.js';
-import { DemoOctopus, demoAccountInfo } from './demo.js';
+import { AccountData, describeAccount, monthsToLoad, DEFAULT_MONTHS, billingFromDay, chooseBilling } from './data.js';
+import { DemoOctopus, demoAccountInfo, DEMO_NUMBER } from './demo.js';
 import { BillsView } from './bills.js';
 import { renderHeatmap } from './heatmap.js';
 
@@ -98,15 +96,16 @@ function persist(extra = {}) {
 }
 
 async function start(info) {
-  const user = remembered()?.billingDay;
-  if (user) {
-    info.billing = { anchor: anchorFromBillingDay(user, todayKey()), months: 1, source: 'user' };
-  }
   data = new AccountData(octo, info);
   bills = new BillsView($('view-bills'), data, {
+    // A day the user chooses holds for this visit, and is remembered with the account when the
+    // browser is remembering it (design §4.4).
     onBillingDay: (day) => {
-      data.info.billing = { anchor: anchorFromBillingDay(day, todayKey()), months: 1, source: 'user' };
-      if (keep) remember({ ...(remembered() || {}), billingDay: day });
+      data.info.billing = billingFromDay(day, 'user');
+      if (keep && info.number !== DEMO_NUMBER) {
+        const r = remembered() || {};
+        remember({ ...r, billingDays: { ...(r.billingDays || {}), [info.number]: data.info.billing.day } });
+      }
     },
   });
   await loadMonths(monthsToLoad(monthsWanted));
@@ -144,13 +143,14 @@ async function signInAndLoad(signIn) {
     const acc = await octo.accountInfo(number);
     const info = describeAccount(number, acc);
     if (!info.import) throw new Error('No electricity import meter on this account.');
-    const recent = await octo.recentBills(number).catch(() => []);
-    info.evidence = { options: acc.billingOptions || null, bills: recent };
-    // An account's statements need not close on a fixed day: when there are statements, they are
-    // the bill periods (design §5.2).
-    if (recent.some((b) => String(b.billType || '').toUpperCase() === 'STATEMENT')) {
-      info.billing = { statements: recent, options: acc.billingOptions || null, source: 'statements' };
-    }
+    // What Octopus holds about billing, shown on the page; each is optional.
+    const [trigger, payments, recent] = await Promise.all([
+      octo.billingTrigger(number).catch((e) => ({ error: e.message || 'error' })),
+      octo.paymentSchedules(number).catch(() => []),
+      octo.recentBills(number).catch(() => []),
+    ]);
+    info.evidence = { options: acc.billingOptions || null, trigger, payments, bills: recent };
+    info.billing = chooseBilling({ userDay: remembered()?.billingDays?.[number] ?? null, info, trigger });
     $('who').textContent = number;
     await start(info);
   } catch (e) {

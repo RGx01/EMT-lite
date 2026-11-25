@@ -40,16 +40,40 @@ export function describeAccount(number, acc, today = todayKey()) {
   const pick = (list) => list.find(live) || list[0] || null;
   const imp = pick(imports), exp = pick(exports);
 
+  // The billing day (design §5.2): Octopus's periodStartDay. currentBillingPeriodStartDate is
+  // not used: on the first real account it was the statement cycle's date, not the billing day.
   const bo = acc?.billingOptions || {};
   const months = (String(bo.periodLength || 'MONTHLY').toUpperCase() === 'QUARTERLY' ? 3 : 1)
     * Math.max(1, Number(bo.periodLengthMultiplier) || 1);
-  let billing = null;
-  if (bo.currentBillingPeriodStartDate) {
-    billing = { anchor: bo.currentBillingPeriodStartDate, months, source: 'octopus' };
-  } else if (bo.periodStartDay) {
-    billing = { anchor: anchorFromBillingDay(bo.periodStartDay, today), months, source: 'octopus' };
-  }
+  const billing = bo.periodStartDay ? billingFromDay(bo.periodStartDay, 'octopus', today, months) : null;
   return { number, import: imp && meterOf(imp), export: exp && meterOf(exp), billing };
+}
+
+export const DEFAULT_BILLING_DAY = 1;
+
+export function billingFromDay(day, source, today = todayKey(), months = 1) {
+  const d = Math.max(1, Math.min(31, Math.round(Number(day)) || DEFAULT_BILLING_DAY));
+  return { day: d, anchor: anchorFromBillingDay(d, today), months, source };
+}
+
+/** A monthly trigger day from Kraken's billing trigger configuration, or null. */
+export function triggerDay(trigger) {
+  if (!trigger || trigger.error || trigger.isActive === false) return null;
+  const f = (trigger.operationFrequencies || []).find((o) => /MONTH/i.test(String(o.frequency || ''))
+    && Number(o.multiplier || 1) === 1 && Number(o.triggerAtStartDay) >= 1);
+  return f ? Number(f.triggerAtStartDay) : null;
+}
+
+/**
+ * The billing rule, in order: a day the user chose; Octopus's periodStartDay; Kraken's monthly
+ * billing trigger day; the 1st. Pure.
+ */
+export function chooseBilling({ userDay = null, info = null, trigger = null, today = todayKey() }) {
+  if (userDay) return billingFromDay(userDay, 'user', today);
+  if (info?.billing) return info.billing;
+  const t = triggerDay(trigger);
+  if (t) return billingFromDay(t, 'trigger', today);
+  return billingFromDay(DEFAULT_BILLING_DAY, 'default', today);
 }
 
 /** The local months to load, newest first: `count` months ending with this one. */

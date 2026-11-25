@@ -194,51 +194,8 @@ describe('future half-hours', () => {
     const s = summarise({ start: '2026-11-14', end: '2026-12-14' }, imp, cover);
     expect(s.days).toBe(12);
     expect(s.finished).toBe(false);
-    // 14–24 Nov: 11 days × 48 missing; 25 Nov 00:00–10:00 has 21 slots, of which 0–9 missing
-    expect(s.missing + s.pending).toBe(11 * 48 + 21);
-  });
-});
-
-// Statements that close on different days each month (fictional dates, the shape a real account showed).
-import { periodsFromStatements } from '../src/periods.js';
-
-describe('bill periods from statements', () => {
-  const statements = [
-    { billType: 'STATEMENT', fromDate: '2025-10-07', toDate: '2025-11-06' },
-    { billType: 'STATEMENT', fromDate: '2025-09-08', toDate: '2025-10-06' },
-    { billType: 'STATEMENT', fromDate: '2025-08-04', toDate: '2025-09-07' },
-    { billType: 'STATEMENT', fromDate: '2025-07-04', toDate: '2025-08-03' },
-  ];
-  const current = { currentBillingPeriodStartDate: '2025-11-07', currentBillingPeriodEndDate: null };
-
-  it('takes each statement’s own dates, so a period ends where its statement ends', () => {
-    const ps = periodsFromStatements(statements, current, '2025-07-04', '2025-11-25');
-    expect(ps.filter((p) => !p.estimated).map((p) => [p.start, p.end])).toEqual([
-      ['2025-07-04', '2025-08-04'],
-      ['2025-08-04', '2025-09-08'],
-      ['2025-09-08', '2025-10-07'],
-      ['2025-10-07', '2025-11-07'],
-    ]);
-  });
-  it('adds the open current period, a month long when Octopus gives no end', () => {
-    const ps = periodsFromStatements(statements, current, '2025-07-04', '2025-11-25');
-    expect(ps.at(-1)).toEqual({ start: '2025-11-07', end: '2025-12-07', estimated: true, current: true });
-  });
-  it('estimates months back from the oldest statement for history before it', () => {
-    const ps = periodsFromStatements(statements, current, '2025-05-20', '2025-11-25');
-    expect(ps.slice(0, 2)).toEqual([
-      { start: '2025-05-04', end: '2025-06-04', estimated: true },
-      { start: '2025-06-04', end: '2025-07-04', estimated: true },
-    ]);
-  });
-  it('ignores bills that are not statements, and repeats', () => {
-    const ps = periodsFromStatements(
-      [...statements, statements[0], { billType: 'INVOICE', fromDate: '2025-09-01', toDate: '2025-09-30' }],
-      current, '2025-07-04', '2025-11-25');
-    expect(ps.filter((p) => !p.estimated)).toHaveLength(4);
-  });
-  it('has no statements: returns nothing, so the fixed-day rule is used', () => {
-    expect(periodsFromStatements([], current, '2025-07-04', '2025-11-25')).toEqual([]);
+    // 14–24 Nov: 11 days × 48; 25 Nov: the 20 half-hours finished by 10:00 (10:00–10:30 is in progress)
+    expect(s.missing + s.pending).toBe(11 * 48 + 20);
   });
 });
 
@@ -333,5 +290,65 @@ describe('net heatmap cells', () => {
   it('an export meter supplied only later is not missing before it started', () => {
     const late = { ...cover, from: '2026-11-20' };
     expect(cellOf(imp, cover, exp, late, k, 1).hatch).toBe(null);
+  });
+});
+
+import { chooseBilling, triggerDay, describeAccount } from '../src/data.js';
+
+describe('the billing day', () => {
+  const today = '2026-11-25';
+  it('defaults to the 1st when Octopus says nothing', () => {
+    const b = chooseBilling({ today });
+    expect(b).toMatchObject({ day: 1, source: 'default', anchor: '2026-11-01' });
+  });
+  it('takes a monthly billing trigger day', () => {
+    const trigger = { isActive: true, operationFrequencies: [{ frequency: 'MONTHLY', multiplier: 1, triggerAtStartDay: 3 }] };
+    expect(triggerDay(trigger)).toBe(3);
+    expect(chooseBilling({ trigger, today })).toMatchObject({ day: 3, source: 'trigger', anchor: '2026-11-03' });
+  });
+  it('ignores an inactive trigger', () => {
+    expect(triggerDay({ isActive: false, operationFrequencies: [{ frequency: 'MONTHLY', multiplier: 1, triggerAtStartDay: 3 }] })).toBe(null);
+  });
+  it('a day the user chose wins over everything', () => {
+    const info = { billing: { day: 9, anchor: '2026-11-09', months: 1, source: 'octopus' } };
+    expect(chooseBilling({ userDay: 3, info, today })).toMatchObject({ day: 3, source: 'user' });
+  });
+  it('does not take the current period start as the billing day', () => {
+    const info = describeAccount('A-0000ABC7', { billingOptions: { currentBillingPeriodStartDate: '2026-11-07' }, properties: [] }, today);
+    expect(info.billing).toBe(null);
+  });
+});
+
+describe('today on the heatmap', () => {
+  it('a finished half-hour today with no reading is hatched; the one in progress is not', () => {
+    const now = midnight('2026-11-25') + 20 * HALF_HOUR + 60000;            // 10:01
+    const cover = { from: '2026-01-01', last: midnight('2026-11-24') + 40 * HALF_HOUR, now };
+    const empty = new Map();
+    expect(cellOf(empty, cover, empty, cover, '2026-11-25', 19).hatch).toBe('bw');
+    expect(cellOf(empty, cover, empty, cover, '2026-11-25', 20).hatch).toBe(null);
+    expect(cellOf(empty, cover, null, null, '2026-11-24', 45).hatch).toBe('bw');
+  });
+});
+
+import { solid, sideRateLine } from '../src/rates.js';
+
+describe('solid rate lines', () => {
+  const slots = [0, 1, 2, 3, 4];
+  it('fills gaps from the rate before, and a leading gap from the first rate', () => {
+    const r = solid(new Map([[0, null], [1, 7], [2, null], [3, 24], [4, null]]), slots);
+    expect([...r.values()]).toEqual([7, 7, 7, 24, 24]);
+  });
+  it('a side that drew nothing takes its band’s rate, then the other side’s', () => {
+    const sp = (ev, home, band) => ({ [`ev:${band}`]: { kwh: ev, cost: ev * (band === 'off' ? 7 : 24.5) },
+      [`home:${band}`]: { kwh: home, cost: home * (band === 'off' ? 7 : 24.5) } });
+    const day = new Map([
+      [0, { kwh: 3.7, offPeak: true, split: sp(3.5, 0.2, 'off') }],
+      [1, { kwh: 0.3, offPeak: false, split: sp(0, 0.3, 'peak') }],
+    ]);
+    const ev = sideRateLine('2026-10-01', day, [0, 1], 'ev');
+    expect(ev.get(0)).toBeCloseTo(7);
+    expect(ev.get(1)).toBeCloseTo(24.5);     // EV drew nothing at peak: the house's peak rate
+    const home = sideRateLine('2026-10-01', day, [0, 1], 'home');
+    expect(home.get(1)).toBeCloseTo(24.5);
   });
 });

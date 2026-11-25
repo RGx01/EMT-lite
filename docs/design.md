@@ -22,10 +22,19 @@ A web page for an Octopus customer **without Home Assistant**. They paste their 
    A half-hour Octopus has **no reading for** is hatched over its cell: **green** where the export
    reading is missing (the colour is the import alone), **red** where the import is missing (the
    colour is the export alone), **black and white** where neither is there, or the import is
-   missing on an account without export. Decided 25 Nov 2026, replacing an Import / Export toggle.
+   missing on an account without export. Green and red slant opposite ways (`/` and `\`), so they
+   differ without red-green colour vision. A finished half-hour with no reading is hatched even
+   when it is only late, today included: the heatmap shows what Octopus holds now. Decided
+   25 Nov 2026, replacing an Import / Export toggle.
 3. **The House / EV split** on an IOG-SMB tariff: Octopus's own split, from the kWh and cost of
    each of its buckets (EMT's `bucket_side`), as rows on the bill card. A half-hour with a bucket
-   label it does not recognise is left unsplit, not guessed, and the card says how many.
+   label it does not recognise is left unsplit, not guessed, and the card says how many. The day
+   charts stack each bucket as its own bar, with a solid rate line for the House and one for the
+   EV (§5.5).
+
+**Colours** are Okabe–Ito, distinguishable with red-green colour blindness: House off-peak / peak
+sky blue / blue, EV off-peak / peak orange / vermillion, export bluish green, the EV rate reddish
+purple, the House rate the text colour.
 
 What it is not: no live power, no devices or EV split, no Data Management, no corrections, no bill
 PDFs, no carbon. It shows what Octopus holds, and the gaps in it.
@@ -117,21 +126,23 @@ introspection on 25 Nov 2026.
 `periodLengthMultiplier`, `isFixed`, `currentBillingPeriodStartDate` and
 `currentBillingPeriodEndDate`.
 
-**Statements first (25 Nov 2026).** The first real account tried had no `periodStartDay`, and its
-statements closed on different days each month. A fixed day cannot cut
-those periods. So when `account.bills` returns statements, **each statement's own dates are its
-bill period**; after the last comes the current one (`currentBillingPeriodStartDate` to its end
-date, or a month on); history older than the oldest statement is estimated monthly back from it.
-Every period not taken from a statement is labelled estimated.
+**The billing day (decided 25 Nov 2026).** In order:
 
-Without statements:
+1. A day the user chose on the page. It holds for the visit, and is stored with the account when
+   *Remember me* is on (§4.4).
+2. `billingOptions.periodStartDay`.
+3. A monthly `billingTriggerConfiguration.operationFrequencies[].triggerAtStartDay` (Kraken's
+   "day of the month when billing is triggered").
+4. The 1st.
 
-1. If `periodStartDay` or `currentBillingPeriodStartDate` is set, step a month (or a quarter) from it.
-2. If neither, ask the user, and let them change it. A day the user enters overrides everything.
+Not used: `currentBillingPeriodStartDate` and the statements' dates. On the first real account
+tried, the user's billing day was the 3rd while Octopus held no start day and no billing trigger,
+its current period began on a different day, and its statements closed on different days each
+month. The payment schedule's `paymentDay` is the Direct Debit day, not the billing day; it is
+shown, not used. All of these are listed under *What Octopus says about your billing* on the page.
 
-**Monthly and quarterly use one rule.** Bill periods are cut backwards (and forwards) from
-`currentBillingPeriodStartDate` in steps of `periodLength` × `periodLengthMultiplier` months. With
-no `currentBillingPeriodStartDate`, a monthly cut from the billing day found above is used.
+**Monthly and quarterly use one rule.** Bill periods step from the billing day in `periodLength` ×
+`periodLengthMultiplier` months (monthly unless Octopus says otherwise).
 
 ### 5.3 The half-hours, with their cost
 
@@ -171,6 +182,9 @@ The day chart's rate for each half-hour is what Octopus charged:
   (`/v1/products/{product}/electricity-tariffs/{tariff}/standard-unit-rates/`, using
   `value_exc_vat` and the VAT calendar). That endpoint is public and needs no key. Those rates fill
   the zero-kWh half-hours. Where kWh is not zero, the charged rate still comes from the cost.
+- **Solid lines:** a half-hour left without a rate takes the one before it (the first after it at
+  the start of the day), so the line has no gaps. On IOG-SMB the House and EV each get a line:
+  that side's bucket cost ÷ its kWh, or, where it drew nothing, its band's rate that day.
 - Rejected: published rates for every account. They miss Intelligent's dispatch off-peak
   half-hours, which only Octopus's labels carry.
 

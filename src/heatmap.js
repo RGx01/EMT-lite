@@ -5,8 +5,9 @@
 //
 // Gaps are hatched over the cell (cellOf):
 //   black and white      no import reading (and no export reading to show instead)
-//   green over colour    the export reading is missing; the colour is the import alone
-//   red over colour      the import reading is missing; the colour is the export alone
+//   green / over colour  the export reading is missing; the colour is the import alone
+//   red \ over colour    the import reading is missing; the colour is the export alone
+// Green and red slant opposite ways, so they differ without red-green colour vision.
 // Blank: not in yet, before the supply started, or a half-hour the clocks skipped.
 
 import { daysBetween, slotsOfDay, parseKey } from './time.js';
@@ -50,8 +51,11 @@ export function paint(stops, mn, mx, v) {
  * Returns { value: net kWh | null, hatch: null | 'bw' | 'green' | 'red', imp, exp, impSt, expSt }.
  */
 export function cellOf(imp, impCover, exp, expCover, dayKey, slot) {
-  const impSt = slotState(imp, dayKey, slot, impCover);
-  const expSt = exp ? slotState(exp, dayKey, slot, expCover) : 'none';
+  // A finished half-hour Octopus has no reading for is hatched, whether or not it is merely late
+  // ('pending'): the heatmap shows what Octopus holds now, today included.
+  const gap = (st) => (st === 'pending' ? 'missing' : st);
+  const impSt = gap(slotState(imp, dayKey, slot, impCover));
+  const expSt = exp ? gap(slotState(exp, dayKey, slot, expCover)) : 'none';
   const i = impSt === 'present' ? imp.get(dayKey).get(slot).kwh : null;
   const e = expSt === 'present' ? exp.get(dayKey).get(slot).kwh : null;
   const out = { value: null, hatch: null, imp: i, exp: e, impSt, expSt };
@@ -78,7 +82,13 @@ function hatch(ctx, kind) {
   const x = c.getContext('2d');
   if (base) { x.fillStyle = base; x.fillRect(0, 0, 6, 6); }
   x.strokeStyle = line; x.lineWidth = kind === 'bw' ? 1.2 : 1.6;
-  x.beginPath(); x.moveTo(-1, 7); x.lineTo(7, -1); x.moveTo(-1, 1); x.lineTo(1, -1); x.moveTo(5, 7); x.lineTo(7, 5); x.stroke();
+  x.beginPath();
+  if (kind === 'red') {      // the other slant, so red and green differ without colour vision
+    x.moveTo(-1, -1); x.lineTo(7, 7); x.moveTo(5, -1); x.lineTo(7, 1); x.moveTo(-1, 5); x.lineTo(1, 7);
+  } else {
+    x.moveTo(-1, 7); x.lineTo(7, -1); x.moveTo(-1, 1); x.lineTo(1, -1); x.moveTo(5, 7); x.lineTo(7, 5);
+  }
+  x.stroke();
   return (_hatches[kind] = ctx.createPattern(c, 'repeat'));
 }
 
@@ -229,8 +239,8 @@ function legend(stops, mn, mx, withExport) {
   el.append(span(`${mn.toFixed(2)} kWh`), bar, span(`${mx.toFixed(2)} kWh${withExport ? ' (import − export)' : ''}`));
   el.append(span('', 'hm-swatch bw'), span(withExport ? 'no import or export reading' : 'no reading from Octopus'));
   if (withExport) {
-    el.append(span('', 'hm-swatch green'), span('export missing'));
-    el.append(span('', 'hm-swatch red'), span('import missing'));
+    el.append(span('', 'hm-swatch green'), span('export missing (/)'));
+    el.append(span('', 'hm-swatch red'), span('import missing (\\)'));
   }
   return el;
 }
