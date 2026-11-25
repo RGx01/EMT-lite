@@ -5,6 +5,14 @@ import { deviceCache, deleteDeviceCache } from './cache.js';
 import { BillsView } from './bills.js';
 import { renderHeatmap } from './heatmap.js';
 
+// The page's header bar stays at the top; the bills' own bar sticks just below it (--top-h).
+{
+  const top = document.querySelector('.top');
+  const setTop = () => document.documentElement.style.setProperty('--top-h', `${top.offsetHeight}px`);
+  new ResizeObserver(setTop).observe(top);
+  setTop();
+}
+
 // "Remember me" (design §4.4): Octopus's refresh token, the account number and a billing day the
 // user entered. Never the key. Nothing else is written to the browser.
 const STORE = 'emt-lite';

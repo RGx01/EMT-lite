@@ -23,6 +23,8 @@ A web page for an Octopus customer **without Home Assistant**. They paste their 
 2. **A data heatmap.** EMT's kWh heatmap (`web/templates/heatmap_module.html`): one row per day, one
    square per local half-hour, a month per chart, coloured by **net** kWh (import − export) with
    EMT's colour stops, and the daily net as bars beside it: one grid, as EMT's kWh heatmap.
+   Hovering a cell gives its import, export and net; hovering a day's bar (anywhere across the bar
+   column, so a short bar is easy to hit) gives the day's net, import, export and missing half-hours.
    A half-hour Octopus has **no reading for** is hatched over its cell: **green** where the export
    reading is missing (the colour is the import alone), **red** where the import is missing (the
    colour is the export alone), **black and white** where neither is there, or the import is
@@ -35,6 +37,13 @@ A web page for an Octopus customer **without Home Assistant**. They paste their 
    label it does not recognise is left unsplit, not guessed, and the card says how many. The day
    charts stack each bucket as its own bar, with a solid rate line for the House and one for the
    EV (§5.5).
+
+**Around the page.** The page's own header bar (EMT-Lite, the account, Bills / Heatmap, Sign out)
+stays at the top on every view; the bills' bar sticks just under it. On a wide screen the header
+bar also says *Got Home Assistant? Try EMT for a richer experience*, linking to Home Assistant's
+add-repository page for EMT and to EMT on GitHub. The footer carries the same, for narrow screens,
+and a link to this repository's issues, for problems and suggestions (it works for others only
+once the repository is public).
 
 **Colours** are Okabe–Ito, distinguishable with red-green colour blindness: House off-peak / peak
 sky blue / blue, EV off-peak / peak orange / vermillion, export bluish green, the EV rate reddish

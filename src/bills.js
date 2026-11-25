@@ -47,6 +47,9 @@ const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 const fmtSlot = (s) => `${String(Math.floor(s / 2)).padStart(2, '0')}:${s % 2 ? '30' : '00'}`;
 
+/** The page's own header bar, which stays at the top above the bills' bar. */
+const topBarHeight = () => document.querySelector('.top')?.offsetHeight || 0;
+
 function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -177,7 +180,7 @@ export class BillsView {
     this.stripObserver?.disconnect();
     this.stripObserver = new IntersectionObserver(([e]) => {
       strip.hidden = e.isIntersecting || e.boundingClientRect.top > 0;
-    }, { rootMargin: `-${head.offsetHeight}px 0px 0px 0px` });
+    }, { rootMargin: `-${topBarHeight() + head.offsetHeight}px 0px 0px 0px` });
     this.stripObserver.observe(card);
   }
 
