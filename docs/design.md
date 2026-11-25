@@ -192,6 +192,19 @@ What EMT learned the hard way, which EMT-Lite starts with:
   (`vat_calendar.py`: 5% up to 30 Sep 2026, 0% from 1 Oct 2026, at local midnight).
   **Do not use `costInclTax`**: Octopus's half-hourly figures carried 5% after the change (v4
   #505).
+- **Rounding: EMT's Bill Rounding** (built 25 Nov 2026; EMT `energy_charts._bill_method_breakdown`,
+  `bill_card.bill_total`). This is how Octopus builds a bill.
+  - Every half-hour's ex-VAT cost is summed **unrounded**. Each line of the bill is rounded to the
+    penny **once**: energy ex VAT, standing charge ex VAT (one line per distinct daily rate), VAT,
+    and Total incl. VAT.
+  - The export credit is rounded once, as printed. The bill is Total incl. VAT less that credit.
+  - Lines are rounded separately, so energy + standing + VAT can be a penny off Total incl. VAT, as
+    on EMT's card.
+  - A half penny rounds to even, as Python's `round` does in EMT.
+  - The card shows these lines ex VAT, with a VAT line ("VAT @ 5% to 30 Sep, 0% from 1 Oct" across
+    the change). Each day's table note does the same for that day.
+  - Before this, the card summed VAT-inclusive pence and rounded only for display, so its rows could
+    miss the total by a penny and the export credit was taken off unrounded.
 - **Business VAT** (built 25 Nov 2026). Kraken's `account.accountType` is `BUSINESS…` for a business
   account. Such an account pays the rate its import tariff carries (standing charge inc VAT ÷
   `preVatStandingCharge`; every tariff type has both). The rate comes from the agreement in force
