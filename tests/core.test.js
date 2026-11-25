@@ -330,7 +330,7 @@ describe('today on the heatmap', () => {
   });
 });
 
-import { solid, sideRateLine } from '../src/rates.js';
+import { solid, sideRateLine, inIogWindow, offWindowOf } from '../src/rates.js';
 
 describe('solid rate lines', () => {
   const slots = [0, 1, 2, 3, 4];
@@ -697,5 +697,45 @@ describe('the Kraken schema check', () => {
       const f = checkDocuments(schema, { [name]: src }).filter((x) => /does not parse/.test(x.message));
       expect(f, name).toEqual([]);
     }
+  });
+});
+
+describe('IOG rate line: a half-hour with no import (no Octopus split)', () => {
+  // An Intelligent day without the House/EV split: peak 30p, off-peak 5p ex VAT (made-up rates).
+  // A dispatch 19:30–20:30 (slots 39–40), then nothing drawn 20:30–22:30 (slots 41–44), peak at
+  // 23:00 (46), and the IOG window from 23:30 (47).
+  const k = '2026-11-10', t = (s) => midnight(k) + s * HALF_HOUR;
+  const iv = (s, kwh, rate, offPeak) => ({ start: t(s), kwh, costExc: kwh * rate, standingExc: 0, offPeak, split: null });
+  const zero = (s) => ({ start: t(s), kwh: 0, costExc: 0, standingExc: 0, offPeak: null, split: null });
+  const day = byDay([
+    iv(37, 0.2, 30, false), iv(38, 0.2, 30, false), iv(39, 3, 5, true), iv(40, 3, 5, true),
+    zero(41), zero(42), zero(43), zero(44), zero(45), iv(46, 0.1, 30, false), iv(47, 3, 5, true),
+  ]).get(k);
+  const slots = [...slotsOfDay(k)].sort((a, b) => a - b);
+  const line = solid(rateLine(k, day, slots, null, () => 0, inIogWindow), slots);
+
+  it('goes back to peak when the dispatch ends, not the off-peak rate carried on', () => {
+    for (const s of [41, 42, 43, 44, 45]) expect(line.get(s), `slot ${s}`).toBeCloseTo(30);
+  });
+  it('keeps what Octopus charged where there was import', () => {
+    expect(line.get(40)).toBeCloseTo(5);
+    expect(line.get(46)).toBeCloseTo(30);
+    expect(line.get(47)).toBeCloseTo(5);
+  });
+  it('an empty half-hour inside 23:30–05:30 is off-peak', () => {
+    const night = byDay([iv(46, 0.1, 30, false), zero(47), iv(10, 3, 5, true), zero(2)]).get(k);
+    const l = solid(rateLine(k, night, slots, null, () => 0, inIogWindow), slots);
+    expect(l.get(47)).toBeCloseTo(5);
+    expect(l.get(2)).toBeCloseTo(5);
+  });
+  it('the window applies to Intelligent tariffs only', () => {
+    expect(offWindowOf({ productCode: 'INTELLI-VAR-24-10-29' })).toBe(inIogWindow);
+    expect(offWindowOf({ productCode: 'INTELLI-BB-VAR-23-03-01' })).toBe(inIogWindow);
+    expect(offWindowOf({ productCode: 'AGILE-24-10-01' })).toBe(null);
+    expect(offWindowOf(null)).toBe(null);
+  });
+  it('without a window (not Intelligent) the line still carries on, as before', () => {
+    const l = solid(rateLine(k, day, slots, null, () => 0), slots);
+    expect(l.get(41)).toBeCloseTo(5);
   });
 });

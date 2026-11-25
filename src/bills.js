@@ -8,7 +8,7 @@ import {
 import { billPeriods, calendarPeriods, previousOf, lastYearOf, periodLabel } from './periods.js';
 import { summarise, pounds } from './bill.js';
 import { vatFor } from './vat.js';
-import { rateLine, solid, sideRateLine, exportRateLine } from './rates.js';
+import { rateLine, solid, sideRateLine, exportRateLine, offWindowOf } from './rates.js';
 import { daysBetween, slotsOfDay, todayKey, parseKey, addDays } from './time.js';
 
 Chart.register(BarController, BarElement, LineController, LineElement, PointElement, LinearScale, CategoryScale, Tooltip, Legend);
@@ -431,7 +431,7 @@ export class BillsView {
       datasets.push(
         bar('Import off-peak', PALETTE.houseOff, (s) => (iv(s)?.offPeak === true ? iv(s).kwh : null)),
         bar('Import peak', PALETTE.housePeak, (s) => (iv(s) && iv(s).offPeak !== true ? iv(s).kwh : null)),
-        line('Rate p/kWh', text, solid(rateLine(k, day, slots, this.data.publishedFor(k), this.vat), slots)),
+        line('Rate p/kWh', text, solid(rateLine(k, day, slots, this.data.publishedFor(k), this.vat, offWindowOf(this.data.tariffOn(k))), slots)),
       );
     }
     if (eday) {

@@ -134,6 +134,11 @@ export class AccountData {
     this.expCover = { from: this.info.export?.from || null, last: Number.isFinite(le) ? le : null };
   }
 
+  /** The import tariff in force on a day (its agreement at local noon), or null. */
+  tariffOn(dayKey) {
+    return agreementAt(this.info.import?.agreements, midnight(dayKey) + 12 * 3600000)?.tariff || null;
+  }
+
   /** Published rates for one day as Map<slot, p exc VAT>, or null. */
   publishedFor(dayKey) {
     if (!this.published.size) return null;

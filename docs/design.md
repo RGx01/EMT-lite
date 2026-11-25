@@ -208,9 +208,13 @@ whether REST is cheaper against the rate limit for months that are only needed f
 The day chart's rate for each half-hour is what Octopus charged:
 `costExclTax ÷ kWh`, with VAT added from the calendar (§5.3).
 
-- **A half-hour with no kWh** has no cost to divide. It takes the rate of that day's half-hours with
-  the same Octopus label (`OFF_PEAK` or `STANDARD_RATE`). If none of the day's half-hours has that
-  label, it has no point and the line has a gap.
+- **A half-hour with no kWh** has no cost to divide, and nothing in it carries a label, so it has no
+  band. On an **Intelligent** tariff (a product code with `INTELLI`, without Octopus's House/EV
+  split) it takes the day's off-peak rate inside IOG's 23:30–05:30 window and the day's peak rate
+  outside it. After a dispatch ends, a half-hour that drew nothing is back at peak; until 26 Nov 2026
+  it carried the dispatch's off-peak rate on. On other tariffs it takes the day's rate only when
+  the day charged a single rate; otherwise it has no point, and the solid line carries the rate
+  before it.
 - **Agile** prices every half-hour differently, so the label does not fill gaps. For an Agile
   agreement, the page also fetches the tariff's published unit rates
   (`/v1/products/{product}/electricity-tariffs/{tariff}/standard-unit-rates/`, using
