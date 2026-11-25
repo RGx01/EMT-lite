@@ -56,17 +56,23 @@ export function cellOf(imp, impCover, exp, expCover, dayKey, slot) {
   const gap = (st) => (st === 'pending' ? 'missing' : st);
   const impSt = gap(slotState(imp, dayKey, slot, impCover));
   const expSt = exp ? gap(slotState(exp, dayKey, slot, expCover)) : 'none';
-  const i = impSt === 'present' ? imp.get(dayKey).get(slot).kwh : null;
-  const e = expSt === 'present' ? exp.get(dayKey).get(slot).kwh : null;
+  // 'partial' (the clocks-back hour with one of two readings): its value counts, and it is hatched
+  // as missing on that side.
+  const has = (st) => st === 'present' || st === 'partial';
+  const i = has(impSt) ? imp.get(dayKey).get(slot).kwh : null;
+  const e = has(expSt) ? exp.get(dayKey).get(slot).kwh : null;
   const out = { value: null, hatch: null, imp: i, exp: e, impSt, expSt };
   if (impSt === 'future') return out;
+  const expGap = expSt === 'missing' || expSt === 'partial';
   if (i != null) {
     out.value = i - (e ?? 0);
-    if (expSt === 'missing') out.hatch = 'green';
+    if (impSt === 'partial') out.hatch = expGap || e == null ? 'bw' : 'red';
+    else if (expGap) out.hatch = 'green';
   } else if (impSt === 'missing') {
-    if (e != null) { out.value = -e; out.hatch = 'red'; } else out.hatch = 'bw';
+    if (e != null) { out.value = -e; out.hatch = expSt === 'partial' ? 'bw' : 'red'; } else out.hatch = 'bw';
   } else if (e != null) {
     out.value = -e;                     // import not in yet, or before its supply: the export alone
+    if (expSt === 'partial') out.hatch = 'green';
   } else if (expSt === 'missing') {
     out.hatch = 'green';
   }
@@ -101,10 +107,10 @@ export function daySummary(cells) {
   const d = { imp: 0, exp: 0, impN: 0, expN: 0, missImp: 0, missExp: 0, net: null };
   for (const c of cells) {
     if (!c) continue;
-    if (c.impSt === 'present') { d.imp += c.imp; d.impN++; }
-    if (c.expSt === 'present') { d.exp += c.exp; d.expN++; }
-    if (c.impSt === 'missing') d.missImp++;
-    if (c.expSt === 'missing') d.missExp++;
+    if (c.impSt === 'present' || c.impSt === 'partial') { d.imp += c.imp; d.impN++; }
+    if (c.expSt === 'present' || c.expSt === 'partial') { d.exp += c.exp; d.expN++; }
+    if (c.impSt === 'missing' || c.impSt === 'partial') d.missImp++;
+    if (c.expSt === 'missing' || c.expSt === 'partial') d.missExp++;
     if (c.value != null) d.net = (d.net ?? 0) + c.value;
   }
   return d;
@@ -217,8 +223,8 @@ export function renderHeatmap(root, { months, imp, impCover, exp, expCover }) {
       r.cells.forEach((c, s) => {
         if (!c) return;
         const xx = LEFT + s * (CELL + GAP);
-        if (c.impSt === 'missing') missImp++;
-        if (c.expSt === 'missing') missExp++;
+        if (c.impSt === 'missing' || c.impSt === 'partial') missImp++;
+        if (c.expSt === 'missing' || c.expSt === 'partial') missExp++;
         if (c.value != null) {
           ctx.fillStyle = paint(stops, mn, mx, c.value);
           ctx.fillRect(xx, yy, CELL, CELL);
@@ -263,7 +269,7 @@ export function renderHeatmap(root, { months, imp, impCover, exp, expCover }) {
       const q = hit.find((z) => px >= z.x && px < z.x + CELL && py >= z.y && py < z.y + CELL);
       if (!q) { tip.hidden = true; return; }
       const { c } = q;
-      const say = (st, v) => (st === 'present' ? kwh(v) : st === 'missing' ? 'missing' : st === 'pending' ? 'not in yet'
+      const say = (st, v) => (st === 'present' ? kwh(v) : st === 'partial' ? `${kwh(v)}, one of the hour's two readings missing (clocks back)` : st === 'missing' ? 'missing' : st === 'pending' ? 'not in yet'
         : st === 'outside' ? 'before supply' : st === 'future' ? '—' : '');
       const bits = [`${q.k} ${fmtSlot(q.s)}`, `import ${say(c.impSt, c.imp)}`];
       if (exp) bits.push(`export ${say(c.expSt, c.exp)}`);
