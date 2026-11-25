@@ -8,13 +8,18 @@
     "build": "vite build",
     "preview": "vite preview",
     "test": "vitest run",
-    "deploy": "(git diff --quiet HEAD || (echo 'Commit your changes before deploying: the site should match a commit.' && exit 1)) && npm test && npm run build && wrangler pages deploy dist --project-name emt-lite --branch main --commit-hash $(git rev-parse HEAD)"
+    "deploy": "sh scripts/deploy.sh main",
+    "test:e2e": "playwright test",
+    "check:kraken": "node scripts/check-kraken.mjs",
+    "deploy:dev": "sh scripts/deploy.sh dev"
   },
   "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
     "chart.js": "4.6.2"
   },
   "devDependencies": {
+    "@playwright/test": "1.65.1",
+    "graphql": "17.1.0",
     "vite": "8.3.8",
     "vitest": "5.1.2",
     "wrangler": "4.168.0"

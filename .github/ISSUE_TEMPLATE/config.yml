@@ -1,0 +1,8 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Report a security problem
+    url: https://github.com/RGx01/EMT-lite/security/advisories/new
+    about: Privately, not in a public issue. Never include an API key.
+  - name: EMT for Home Assistant
+    url: https://github.com/RGx01/EMT
+    about: Questions about EMT, the Home Assistant app, belong in its own repository.

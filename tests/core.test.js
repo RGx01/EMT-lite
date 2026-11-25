@@ -665,3 +665,37 @@ describe('business VAT', () => {
     expect(vatNote({ business: true, rate: 0.2, source: 'default' })).toMatch(/standard rate/);
   });
 });
+
+import { buildSchema } from 'graphql';
+import { checkDocuments } from '../scripts/kraken-check.js';
+import { ALL_DOCUMENTS } from '../src/queries.js';
+
+describe('the Kraken schema check', () => {
+  const schema = buildSchema(`
+    type Query { account(accountNumber: String!): Account }
+    type Account { number: String, accountType: String @deprecated(reason: "Use kind. Removal 2027-01-01."), kind: String }
+  `);
+  it('passes a document the schema has', () => {
+    expect(checkDocuments(schema, { a: 'query { account(accountNumber: "x") { number kind } }' })).toEqual([]);
+  });
+  it('flags a deprecated field, with its reason', () => {
+    const f = checkDocuments(schema, { a: 'query { account(accountNumber: "x") { accountType } }' });
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ document: 'a', kind: 'deprecated' });
+    expect(f[0].message).toMatch(/accountType.*deprecated.*Removal 2027-01-01/);
+  });
+  it('flags a field Octopus no longer has as invalid', () => {
+    const f = checkDocuments(schema, { a: 'query { account(accountNumber: "x") { billingOptions { periodStartDay } } }' });
+    expect(f.map((x) => x.kind)).toEqual(['invalid']);
+    expect(f[0].message).toMatch(/billingOptions/);
+  });
+  it('flags a document that does not parse', () => {
+    expect(checkDocuments(schema, { a: 'query {' })[0].kind).toBe('invalid');
+  });
+  it('every document the page sends parses', () => {
+    for (const [name, src] of Object.entries(ALL_DOCUMENTS)) {
+      const f = checkDocuments(schema, { [name]: src }).filter((x) => /does not parse/.test(x.message));
+      expect(f, name).toEqual([]);
+    }
+  });
+});

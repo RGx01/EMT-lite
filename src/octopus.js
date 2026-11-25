@@ -4,8 +4,9 @@
 // The API key is used once, for obtainKrakenToken, and is not kept: the page holds the token
 // (about an hour) and the refresh token. No mutation other than obtainKrakenToken is ever sent.
 
+import { TOKEN_MUTATION, ACCOUNT_NUMBERS, ACCOUNT_INFO, BILLING_TRIGGER, measurementsQuery } from './queries.js';
 import { parseNode } from './measurements.js';
-import { isoLocal, midnight, addDays, addMonths, parseKey, noon, TZ } from './time.js';
+import { isoLocal, midnight, addDays, addMonths, parseKey, noon } from './time.js';
 
 const GQL = 'https://api.octopus.energy/v1/graphql/';
 const REST = 'https://api.octopus.energy/v1';
@@ -14,8 +15,6 @@ const PACE_MS = 400;               // between request starts: one account's limi
 const MAX_IN_FLIGHT = 4;           // small asks, a few at a time: EMT found big asks time out
 const REFRESH_SKEW_S = 120;
 
-const TOKEN_MUTATION =
-  'mutation getToken($input: ObtainJSONWebTokenInput!) { obtainKrakenToken(input: $input) { token refreshToken refreshExpiresIn } }';
 
 export class OctopusError extends Error {
   constructor(message, { code = null, status = null } = {}) {
@@ -153,20 +152,13 @@ export class Octopus {
   // ── what the page asks ─────────────────────────────────────────────────────
 
   async accountNumbers() {
-    const d = await this.gql('query { viewer { accounts { number } } }');
+    const d = await this.gql(ACCOUNT_NUMBERS);
     return (d.viewer?.accounts || []).map((a) => a.number);
   }
 
   async accountInfo(number) {
-    const tariff = (t) => `... on ${t} { productCode tariffCode isExport displayName standingCharge preVatStandingCharge }`;
     const d = await this.gql(
-      `query acc($n: String!) { account(accountNumber: $n) { accountType
-        billingOptions { periodStartDay periodLength periodLengthMultiplier isFixed
-          currentBillingPeriodStartDate currentBillingPeriodEndDate nextBillingDate }
-        properties { id electricityMeterPoints { mpan direction
-          agreements(includeInactive: true) { validFrom validTo tariff {
-            ${['StandardTariff', 'DayNightTariff', 'ThreeRateTariff', 'FourRateEvTariff', 'HalfHourlyTariff', 'PrepayTariff'].map(tariff).join(' ')}
-          } } } } } }`,
+      ACCOUNT_INFO,
       { n: number },
     );
     return d.account || null;
@@ -175,8 +167,7 @@ export class Octopus {
   /** Kraken's billing trigger: the day of the month billing runs, if the account has one. */
   async billingTrigger(number) {
     const d = await this.gql(
-      `query t($n: String!) { account(accountNumber: $n) { billingTriggerConfiguration { isActive nextIssueDate
-        operationFrequencies { operationType targetType frequency multiplier triggerAtStartDay triggerAtStartMonth } } } }`,
+      BILLING_TRIGGER,
       { n: number },
     );
     return d.account?.billingTriggerConfiguration || null;
@@ -191,14 +182,7 @@ export class Octopus {
    *  without costs (design §5.3). */
   async measurementsBetween(number, mpan, startMs, endMs, direction = 'CONSUMPTION') {
     const dir = direction === 'GENERATION' ? 'GENERATION' : 'CONSUMPTION';
-    const q = `query meas($n: String!, $mpan: String!, $start: DateTime!, $end: DateTime!, $first: Int!, $after: String) {
-      account(accountNumber: $n) { properties {
-        measurements(first: $first, after: $after, startAt: $start, endAt: $end, timezone: "${TZ}",
-          utilityFilters: [{ electricityFilters: { readingFrequencyType: THIRTY_MIN_INTERVAL,
-            marketSupplyPointId: $mpan, readingDirection: ${dir} } }]) {
-          edges { node { value unit ... on IntervalMeasurementType { startAt endAt
-            metaData { statistics { type label value costExclTax { estimatedAmount } } } } } }
-          pageInfo { hasNextPage endCursor } } } } }`;
+    const q = measurementsQuery(dir);
     const out = [];
     let after = null;
     for (let page = 0; page < 200; page++) {
