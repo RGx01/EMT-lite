@@ -800,6 +800,8 @@ describe('IOG rate line: a half-hour with no import (no Octopus split)', () => {
   });
 });
 
+import { repeatedSlots } from '../src/time.js';
+
 describe('the clocks-back day: one of a repeated half-hour’s two readings missing', () => {
   // 25 Oct 2026: 01:00 and 01:30 happen twice, in BST (00:00Z, 00:30Z) then GMT (01:00Z, 01:30Z).
   const k = '2026-10-25';
@@ -810,6 +812,11 @@ describe('the clocks-back day: one of a repeated half-hour’s two readings miss
   const gappy = all.filter((x) => x.start !== Date.parse('2026-10-25T01:00:00Z'));
   const cover = { from: '2026-01-01', last: midnight('2026-10-26') - HALF_HOUR, now: midnight('2026-10-27') };
 
+  it('only the clocks-back day has repeated slots: 01:00 and 01:30', () => {
+    expect([...repeatedSlots(k)].sort((a, b) => a - b)).toEqual([2, 3]);
+    expect(repeatedSlots('2026-10-24').size).toBe(0);
+    expect(repeatedSlots('2026-03-29').size).toBe(0);      // clocks forward: shorter, nothing twice
+  });
   it('(guard) both readings there: present, summed', () => {
     const d = byDay(all);
     expect(slotState(d, k, 2, cover)).toBe('present');
