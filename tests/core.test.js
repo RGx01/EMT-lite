@@ -571,3 +571,31 @@ describe('the device cache', () => {
     expect(o.n).toBeGreaterThan(0);
   });
 });
+
+import { daySummary, dayBarText } from '../src/heatmap.js';
+
+describe('the heatmap\'s day bars', () => {
+  const k = '2026-11-10', t = (s) => midnight(k) + s * HALF_HOUR;
+  const cover = { from: '2026-01-01', last: midnight('2026-11-11'), now: midnight('2026-11-12') };
+  const iv = (s, kwh) => ({ start: t(s), kwh, costExc: 1, standingExc: 1, offPeak: null, split: null });
+  const imp = byDay([iv(0, 0.5), iv(1, 0.4)]);
+  const exp = byDay([iv(0, 0.2), iv(2, 1.5)]);
+  const cells = Array.from({ length: 48 }, (_, s) => cellOf(imp, cover, exp, cover, k, s));
+
+  it('a day\'s bar says its net, import, export and missing half-hours', () => {
+    const d = daySummary(cells);
+    expect(d.net).toBeCloseTo(0.5 - 0.2 + 0.4 - 1.5);
+    expect(d.imp).toBeCloseTo(0.9);
+    expect(d.exp).toBeCloseTo(1.7);
+    expect([d.missImp, d.missExp]).toEqual([46, 46]);
+    expect(dayBarText(k, d, true)).toBe('Tue 10 Nov 2026 · net -0.80 kWh · import 0.90 kWh · export 1.70 kWh · 46 import, 46 export half-hours missing');
+  });
+  it('without an export meter, only the import', () => {
+    const only = Array.from({ length: 48 }, (_, s) => cellOf(imp, cover, null, null, k, s));
+    expect(dayBarText(k, daySummary(only), false)).toBe('Tue 10 Nov 2026 · 0.90 kWh · 46 import half-hours missing');
+  });
+  it('a day with no readings says so', () => {
+    const none = Array.from({ length: 48 }, (_, s) => cellOf(new Map(), cover, null, null, k, s));
+    expect(dayBarText(k, daySummary(none), false)).toBe('Tue 10 Nov 2026 · no readings · 48 import half-hours missing');
+  });
+});

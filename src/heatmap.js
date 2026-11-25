@@ -92,6 +92,41 @@ function hatch(ctx, kind) {
   return (_hatches[kind] = ctx.createPattern(c, 'repeat'));
 }
 
+const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
+const SHORT_MON = MON.map((m) => m.slice(0, 3));
+
+/** One day's totals from its cells (cellOf): kWh imported and exported where read, and the
+ *  half-hours missing on each side. */
+export function daySummary(cells) {
+  const d = { imp: 0, exp: 0, impN: 0, expN: 0, missImp: 0, missExp: 0, net: null };
+  for (const c of cells) {
+    if (!c) continue;
+    if (c.impSt === 'present') { d.imp += c.imp; d.impN++; }
+    if (c.expSt === 'present') { d.exp += c.exp; d.expN++; }
+    if (c.impSt === 'missing') d.missImp++;
+    if (c.expSt === 'missing') d.missExp++;
+    if (c.value != null) d.net = (d.net ?? 0) + c.value;
+  }
+  return d;
+}
+
+/** The tooltip on a day's net bar. */
+export function dayBarText(k, d, withExport) {
+  const { y, m, d: dd } = parseKey(k);
+  const dow = DOW[new Date(Date.UTC(y, m - 1, dd)).getUTCDay()];
+  const bits = [`${dow} ${dd} ${SHORT_MON[m - 1]} ${y}`];
+  if (d.net == null) bits.push('no readings');
+  else {
+    bits.push(withExport ? `net ${d.net.toFixed(2)} kWh` : `${d.net.toFixed(2)} kWh`);
+    if (withExport) bits.push(`import ${d.imp.toFixed(2)} kWh`, `export ${d.exp.toFixed(2)} kWh`);
+  }
+  const miss = [];
+  if (d.missImp) miss.push(`${d.missImp} import`);
+  if (withExport && d.missExp) miss.push(`${d.missExp} export`);
+  if (miss.length) bits.push(`${miss.join(', ')} half-hour${d.missImp + (withExport ? d.missExp : 0) === 1 ? '' : 's'} missing`);
+  return bits.join(' · ');
+}
+
 const fmtSlot = (s) => `${String(Math.floor(s / 2)).padStart(2, '0')}:${s % 2 ? '30' : '00'}`;
 const kwh = (v) => `${v.toFixed(3)} kWh`;
 
@@ -167,9 +202,10 @@ export function renderHeatmap(root, { months, imp, impCover, exp, expCover }) {
     ctx.fillText('Net kWh/day', totX, TOP - 8);
 
     let missImp = 0, missExp = 0;
-    const hit = [];
+    const hit = [], bars = [];
     rows.forEach((r, row) => {
       const yy = TOP + row * (CELL + GAP);
+      bars.push({ y: yy, text: dayBarText(r.k, daySummary(r.cells), !!exp) });
       const dow = new Date(`${r.k}T12:00:00Z`).getUTCDay();
       const weekend = dow === 0 || dow === 6;
       ctx.fillStyle = weekend ? (dark() ? '#e8eaf0' : '#1d2130') : axis();
@@ -211,6 +247,19 @@ export function renderHeatmap(root, { months, imp, impCover, exp, expCover }) {
     canvas.addEventListener('mousemove', (ev) => {
       const b = canvas.getBoundingClientRect();
       const px = ev.clientX - b.left, py = ev.clientY - b.top;
+      const show = (text) => {
+        tip.textContent = text;
+        tip.hidden = false;
+        // near the right edge (the day bars are there), it goes to the left of the pointer
+        const right = ev.clientX + 12 + tip.offsetWidth > document.documentElement.clientWidth - 8;
+        tip.style.left = `${right ? ev.pageX - 12 - tip.offsetWidth : ev.pageX + 12}px`;
+        tip.style.top = `${ev.pageY + 12}px`;
+      };
+      // the day's net bar: anywhere across its column, so a short bar is easy to find
+      if (px >= totX && px < totX + TOTAL_W) {
+        const bar = bars.find((z) => py >= z.y && py < z.y + CELL + GAP);
+        if (bar) { show(bar.text); return; }
+      }
       const q = hit.find((z) => px >= z.x && px < z.x + CELL && py >= z.y && py < z.y + CELL);
       if (!q) { tip.hidden = true; return; }
       const { c } = q;
@@ -219,10 +268,7 @@ export function renderHeatmap(root, { months, imp, impCover, exp, expCover }) {
       const bits = [`${q.k} ${fmtSlot(q.s)}`, `import ${say(c.impSt, c.imp)}`];
       if (exp) bits.push(`export ${say(c.expSt, c.exp)}`);
       if (c.value != null && exp) bits.push(`net ${kwh(c.value)}`);
-      tip.textContent = bits.join(' · ');
-      tip.hidden = false;
-      tip.style.left = `${ev.pageX + 12}px`;
-      tip.style.top = `${ev.pageY + 12}px`;
+      show(bits.join(' · '));
     });
     canvas.addEventListener('mouseleave', () => { tip.hidden = true; });
   }
