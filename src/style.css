@@ -16,7 +16,11 @@ main { max-width: 1120px; margin: 0 auto; padding: 16px; }
 .promo a, .foot a { color: var(--accent); }
 /* on a narrow screen the bar keeps only what is needed to move around; the footer carries EMT */
 @media (max-width: 980px) { .promo { display: none; } }
-.foot { max-width: 1120px; margin: 24px auto 0; padding: 16px; border-top: 1px solid var(--border); display: flex; gap: 8px 20px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
+/* the footer stays in view: at the bottom of the window on a long page, under the content on a short one */
+body { min-height: 100vh; display: flex; flex-direction: column; }
+main { flex: 1 0 auto; width: 100%; }
+.foot { position: sticky; bottom: 0; z-index: 30; margin-top: 24px; padding: 8px 16px; background: var(--surface); border-top: 1px solid var(--border);
+  display: flex; justify-content: center; gap: 4px 20px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
 .top h1 { font-size: 18px; margin: 0; }
 .top nav { display: flex; gap: 4px; margin-left: auto; }
 .top nav[hidden] + #forget { margin-left: auto; }
@@ -69,7 +73,7 @@ select, input { background: var(--surface); border: 1px solid var(--border); bor
 .hm-month { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; overflow-x: auto; }
 .hm-month h3 { margin: 0 0 4px; font-size: 15px; }
 .hm-note { font-size: 12px; font-weight: 400; color: var(--warn); }
-.hm-tip { position: absolute; white-space: nowrap; z-index: 10; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,.2); }
+.hm-tip { position: absolute; white-space: nowrap; z-index: 40; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,.2); }
 #more { margin: 8px 0 24px; }
 #account-pick { margin-bottom: 12px; }
 .evidence { font-size: 13px; color: var(--muted); margin: -4px 0 12px; }
