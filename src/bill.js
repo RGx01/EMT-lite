@@ -6,7 +6,7 @@
 // which is how Octopus builds a bill: every half-hour's ex-VAT cost is summed UNROUNDED, and only
 // the bill's lines are rounded to the penny, once each (billMethod below).
 
-import { daysBetween, slotsOfDay, dayKeyOf, slotOf, instantsOf, HALF_HOUR } from './time.js';
+import { daysBetween, slotsOfDay, dayKeyOf, slotOf, instantsOf, repeatedSlots, HALF_HOUR } from './time.js';
 import { vatRate } from './vat.js';
 
 /**
@@ -22,19 +22,20 @@ import { vatRate } from './vat.js';
  *             now: ms (defaults to the clock) }.
  */
 export function slotState(days, dayKey, slot, cover) {
-  const now = cover.now ?? Date.now(), today = dayKeyOf(now);
+  const now = cover.now ?? Date.now();
   const iv = days.get(dayKey)?.get(slot);
   if (iv) {
     // A repeated clocks-back half-hour is two readings; one absent, finished and not merely late
     // (at or before the latest reading, after the supply began) is missing.
-    const inst = instantsOf(dayKey, slot);
-    if (inst.length > 1 && iv.starts) {
+    if (iv.starts && repeatedSlots(dayKey).has(slot)) {
+      const inst = instantsOf(dayKey, slot);
       const gone = inst.filter((t) => !iv.starts.includes(t) && t + HALF_HOUR <= now
         && cover.last != null && t <= cover.last && !(cover.from && dayKeyOf(t) < cover.from));
       if (gone.length) return 'partial';
     }
     return 'present';
   }
+  const today = dayKeyOf(now);
   // the half-hour in progress has not finished: it is future too
   if (dayKey > today || (dayKey === today && slot >= slotOf(now))) return 'future';
   if (cover.from && dayKey < cover.from) return 'outside';
