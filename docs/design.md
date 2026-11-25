@@ -1,6 +1,6 @@
 # EMT-Lite — billing charts and a missing-data heatmap in the browser
 
-*Design, 25 Nov 2026. **Draft, not built.** Its six open questions were decided on 25 Nov 2026 (§9). Almost everything it knows about Octopus,
+*Design, 25 Nov 2026. **Being built** (first pass 25 Nov 2026, §10). Its six open questions were decided on 25 Nov 2026 (§9). Almost everything it knows about Octopus,
 EMT learned first: a file named here without a repository (`kraken_api_client.py`,
 `web/templates/heatmap_module.html`, …) is in [RGx01/EMT](https://github.com/RGx01/EMT).
 This repository is private while the design is drafted, and goes public before the first user
@@ -15,13 +15,30 @@ A web page for an Octopus customer **without Home Assistant**. They paste their 
 1. **Bills.** The bill for each billing period: total, energy, standing charge, off-peak and peak
    split. Under it, one chart a day with the half-hours' kWh as bars and the rate charged as a
    stepped line. The periods are cut the way EMT's Billing tab cuts them (`web/templates/billing_module.html`):
-   Bill / Month / Quarter / Year, with *vs previous* and *vs last year*.
+   Bill / Month / Quarter / Year, with *vs previous* and *vs last year*. As in EMT: a **header bar**
+   that stays at the top (period, stepper, *Show Data*); once the bill has scrolled away, a
+   one-line **bill strip** in it with *↑ Show Bill*; each day's half-hours as a **data table**
+   (its own *☰ Data* button, or all at once from the header), with the standing charge and the
+   day's total under it; legend and hover keys drawn as a line for a rate, a block for a bar.
 2. **A data heatmap.** EMT's kWh heatmap (`web/templates/heatmap_module.html`): one row per day, one
-   square per local half-hour, a month per chart, coloured by the half-hour's kWh with EMT's colour
-   stops, and the daily total as bars beside it. A half-hour that Octopus has **no reading for** is
-   drawn **black and white hatched**. An account with an export meter gets an Import / Export
-   toggle. Each side is its own grid with its own gaps, since the two meters' readings arrive
-   separately.
+   square per local half-hour, a month per chart, coloured by **net** kWh (import − export) with
+   EMT's colour stops, and the daily net as bars beside it: one grid, as EMT's kWh heatmap.
+   A half-hour Octopus has **no reading for** is hatched over its cell: **green** where the export
+   reading is missing (the colour is the import alone), **red** where the import is missing (the
+   colour is the export alone), **black and white** where neither is there, or the import is
+   missing on an account without export. Green and red slant opposite ways (`/` and `\`), so they
+   differ without red-green colour vision. A finished half-hour with no reading is hatched even
+   when it is only late, today included: the heatmap shows what Octopus holds now. Decided
+   25 Nov 2026, replacing an Import / Export toggle.
+3. **The House / EV split** on an IOG-SMB tariff: Octopus's own split, from the kWh and cost of
+   each of its buckets (EMT's `bucket_side`), as rows on the bill card. A half-hour with a bucket
+   label it does not recognise is left unsplit, not guessed, and the card says how many. The day
+   charts stack each bucket as its own bar, with a solid rate line for the House and one for the
+   EV (§5.5).
+
+**Colours** are Okabe–Ito, distinguishable with red-green colour blindness: House off-peak / peak
+sky blue / blue, EV off-peak / peak orange / vermillion, export bluish green, the EV rate reddish
+purple, the House rate the text colour.
 
 What it is not: no live power, no devices or EV split, no Data Management, no corrections, no bill
 PDFs, no carbon. It shows what Octopus holds, and the gaps in it.
@@ -113,14 +130,23 @@ introspection on 25 Nov 2026.
 `periodLengthMultiplier`, `isFixed`, `currentBillingPeriodStartDate` and
 `currentBillingPeriodEndDate`.
 
-1. If `periodStartDay` is set, use it. *Not yet tried with a real key: the first job when
-   built.*
-2. If not, take the start day of `account.bills`.
-3. If neither works, ask the user, store the answer with the cache (§6), and let them change it.
+**The billing day (decided 25 Nov 2026).** In order:
 
-**Monthly and quarterly use one rule.** Bill periods are cut backwards (and forwards) from
-`currentBillingPeriodStartDate` in steps of `periodLength` × `periodLengthMultiplier` months. With
-no `currentBillingPeriodStartDate`, a monthly cut from the billing day found above is used.
+1. A day the user chose on the page. It holds for the visit, and is stored with the account when
+   *Remember me* is on (§4.4).
+2. `billingOptions.periodStartDay`.
+3. A monthly `billingTriggerConfiguration.operationFrequencies[].triggerAtStartDay` (Kraken's
+   "day of the month when billing is triggered").
+4. The 1st.
+
+Not used: `currentBillingPeriodStartDate` and the statements' dates. On the first real account
+tried, the user's billing day was the 3rd while Octopus held no start day and no billing trigger,
+its current period began on a different day, and its statements closed on different days each
+month. The payment schedule's `paymentDay` is the Direct Debit day, not the billing day; it is
+shown, not used. All of these are listed under *What Octopus says about your billing* on the page.
+
+**Monthly and quarterly use one rule.** Bill periods step from the billing day in `periodLength` ×
+`periodLengthMultiplier` months (monthly unless Octopus says otherwise).
 
 ### 5.3 The half-hours, with their cost
 
@@ -132,12 +158,19 @@ per interval.
 
 What EMT learned the hard way, which EMT-Lite starts with:
 
-- **Ask exact local months**, from local midnight on the 1st. A padded window comes back with
-  **no cost**, and narrow windows mislabel the middle of a long smart charge.
-- If a month leaves half-hours without a cost, ask those **local days**. If a day still leaves
-  some, ask noon to noon (EMT's `recover_measurement_costs`). If that still leaves any, they are
-  shown as *kWh, no cost from Octopus*.
-- **Page size 500.** A month is about 1,490 intervals, so 3 pages.
+- **Ask windows of whole local days, at most 10** (25 Nov 2026), each starting and ending at a
+  local midnight. A padded window comes back with **no cost**, and narrow windows mislabel the
+  middle of a long smart charge. Small asks are what EMT found reliable: its 60-day asks timed
+  out where 30-day ones landed. Ten days is at most 482 half-hours, one 500-row page.
+- **Recover what a window leaves without a cost**, in EMT's order (`recover_measurement_costs`):
+  each half-hour's local **day**, then its local **month**, then **noon to noon** (the previous
+  noon to this noon before midday, else this noon to the next). On some days Octopus costs nothing
+  in any window that *starts* at that day's midnight, whatever its end; a window with no costs at
+  all is therefore recovered too. Not asked: the last three days (not priced yet) and days before
+  the supply started. What is still left is shown as *kWh, no cost from Octopus*. On the first
+  real account, August to October left 175–366 half-hours a month without a cost; recovery
+  costed all of them, about a quarter by the month and noon to noon after the day.
+- **Page size 500.**
 - **VAT:** compute the VAT-inclusive cost from `costExclTax` and EMT's VAT calendar
   (`vat_calendar.py`: 5% up to 30 Sep 2026, 0% from 1 Oct 2026, at local midnight).
   **Do not use `costInclTax`**: Octopus's half-hourly figures carried 5% after the change (v4
@@ -160,6 +193,15 @@ The day chart's rate for each half-hour is what Octopus charged:
   (`/v1/products/{product}/electricity-tariffs/{tariff}/standard-unit-rates/`, using
   `value_exc_vat` and the VAT calendar). That endpoint is public and needs no key. Those rates fill
   the zero-kWh half-hours. Where kWh is not zero, the charged rate still comes from the cost.
+- **Solid lines:** a half-hour left without a rate takes the one before it (the first after it at
+  the start of the day), so the line has no gaps. On IOG-SMB the House and EV each get a line:
+  that side's bucket cost ÷ its kWh. Where a side drew nothing (a battery covering the house, say),
+  the half-hour's **band** decides, never the half-hour before: off-peak if any bucket in it
+  carries off-peak (a dispatch), else off-peak inside IOG's 23:30–05:30 window, else peak; the
+  rate is that side's own rate for the band that day, or the other side's. (Carrying the rate on
+  left a house at the dispatch's off-peak rate until 23:30, found on a real account 25 Nov 2026.)
+- **Export rate:** payment ÷ kWh, no VAT. Octopus rounds each half-hour's amount, so when every
+  payment is within half a penny of one rate × its kWh, the day is drawn at that one rate.
 - Rejected: published rates for every account. They miss Intelligent's dispatch off-peak
   half-hours, which only Octopus's labels carry.
 
@@ -169,25 +211,46 @@ Kraken limits by query points per hour, **per account**, so each user spends the
 experience is that the limit is shared by everything using the account. A user running EMT, or
 Octopus's app, takes from the same pot.
 
-- Requests go one at a time, paced, with EMT's backoff on the rate-limit error `KT-CT-1199`.
-- Months come **newest first**. The page is useful after the first answer and fills backwards.
+- Requests are paced (400 ms between starts), with EMT's backoff on the rate-limit error `KT-CT-1199`.
+- At most **four requests in flight**. Months come **newest first**, three at a time, each
+  month's windows for import and export together. A month is shown only once it and every newer
+  month are in, so a month still loading never appears as gaps.
+- The query asks only `costExclTax` (VAT comes from the calendar), not `costInclTax`.
+- Measured on the first real account (IOG-SMB with export, 25 Nov 2026): one request at a time,
+  month windows, about 3½ minutes for 13 months (an import page took about 5 s). Now about 90 s
+  and 216 requests, of which about 80 fetch and the rest recover costs; each request about 1 s.
+  The 400 ms between starts is now the limit. With *Remember me*, settled months then come from
+  the device (§6).
 - **History depth defaults to 13 months** (enough for *vs last year*). "Load more" goes further.
 
 ## 6. Cache
 
-Per account, in **IndexedDB on the user's device**: each month's intervals, with when they were
-fetched. A month that has fully settled is kept. The current month and the month before it are
-re-fetched on each visit, because Octopus fills them in late. Nothing is stored unless the user
-opted in to *Remember me* (§4.4). Otherwise it is memory only, gone with the tab. "Forget me"
-deletes the database.
+Built 25 Nov 2026 (`src/cache.js`). Only when the user ticked *Remember me*, and never for the demo:
+each month's answer from Octopus (import, export, Agile rates) in **IndexedDB on the user's device**,
+keyed by account, meters and month, with when it was fetched.
+
+- **A month is settled 35 days after it ends** (`SETTLE_DAYS`): Octopus's late readings, its cost
+  recovery and its House/EV split revisions (EMT holds a split back up to 28 days) have had their
+  time. A cached month is used only if it was **fetched** after that; anything fetched earlier is
+  asked again and stored again. So the newest two months come from Octopus on every visit.
+- An entry of an older stored shape (`CACHE_SHAPE`) is asked again.
+- **Sign out** deletes the database, as does signing in with *Remember me* unticked and a
+  remembered sign-in that has expired. A sign-in **error** keeps them: a network blip must not
+  throw away what the user asked to be remembered (before 25 Nov 2026 it did, token included).
+- If IndexedDB is unavailable (a private window), the page asks Octopus as without the cache.
+
+Measured on the first real account: the first visit as before (about 90 s, 216 requests); the next
+**10 s and 20 requests**, 11 months from the device and 2 from Octopus. Sign out checked the same
+day: the database gone, the remembered token and billing day gone, the key field empty.
 
 ## 7. Building it
 
 - **Plain JavaScript modules and Vite**, producing static output. No framework: two views do not
   need one, and every dependency is attack surface (§4.2).
-- **Chart.js 4 and `chartjs-chart-matrix`**, as EMT uses. The heatmap and day charts start as
-  ports of `heatmap_module.html` and `billing_module.html`, with the EMT-only parts removed:
-  corrections, settlement states, devices, carbon, PDF.
+- **Chart.js 4** for the day charts, as EMT uses. The heatmap is drawn on a plain canvas with
+  EMT's colour stops, so `chartjs-chart-matrix` is not needed: one dependency fewer (§4.2).
+  Both views are written fresh from `heatmap_module.html` and `billing_module.html`, without the
+  EMT-only parts: corrections, settlement states, devices, carbon, PDF.
 - **Hatching:** a canvas pattern (`createPattern` from a small black-and-white diagonal tile) as
   the cell's fill. EMT's heatmap already draws its "no block" cells this way.
 - **The bill card's arithmetic** lives in one pure module with unit tests: periods, totals,
@@ -227,3 +290,26 @@ Still open:
    months that are only needed for the heatmap (§5.3).
 2. The refresh token's lifetime (§4.4) and whether `periodStartDay` is filled in (§5.2). Both are
    checked with a real key, first thing when built.
+
+## 10. The first pass (25 Nov 2026)
+
+Built on `feat/scaffold`: sign-in with the key or a remembered refresh token, account and meter
+discovery, the billing day (Octopus, then the latest bill, then the user), months loaded newest
+first with the day and noon-to-noon cost fallbacks, Agile's published rates, the Bills view with
+day charts, and the heatmap with Import / Export. Checked under the production headers with
+`npm run preview`: no CSP violations, and a request to any other host is blocked.
+
+Added beyond the design:
+
+- **Try the demo.** A made-up account that runs through the same loader, so the page can be seen
+  before a key is pasted. Its account and MPANs are the project placeholders.
+- **'Future' half-hours.** A half-hour that has not happened yet is neither missing nor pending,
+  and a period that has not ended is shown "so far", without comparisons.
+
+Not yet:
+
+- ~~Tried with a real key.~~ Done 25 Nov 2026: sign-in, Remember me, account discovery, statements,
+  export detection, the House/EV split and the measurement query all work on an IOG-SMB account
+  with export. Its export meter sends zero readings at night, so a night is not hatched green.
+- **Business VAT.** The calendar is domestic (§5.3).
+- **Playwright CSP check** (§7). Checked by hand this time.

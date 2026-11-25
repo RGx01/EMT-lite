@@ -1,0 +1,58 @@
+<!doctype html>
+<html lang="en-GB">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="referrer" content="no-referrer">
+  <title>EMT-Lite — your Octopus bills and missing data</title>
+  <link rel="icon" href="data:,">
+  <link rel="stylesheet" href="/src/style.css">
+  <script type="module" src="/src/main.js"></script>
+</head>
+<body>
+  <header class="top">
+    <h1>EMT-Lite</h1>
+    <span class="muted" id="who"></span>
+    <nav id="tabs" hidden>
+      <button type="button" data-tab="bills" class="tab active">Bills</button>
+      <button type="button" data-tab="heatmap" class="tab">Heatmap</button>
+    </nav>
+    <button type="button" id="forget" class="link" hidden>Sign out</button>
+  </header>
+
+  <main>
+    <section id="signin" class="signin">
+      <h2>See your Octopus bills, half-hour by half-hour</h2>
+      <p>Bill periods and day charts from your Octopus account, and a heatmap that shows the half-hours
+        Octopus has no reading for.</p>
+      <form id="key-form" autocomplete="off">
+        <label for="key">Your Octopus API key</label>
+        <input id="key" type="password" spellcheck="false" autocomplete="off" placeholder="sk_live_…" required>
+        <p class="hint">Find it in your Octopus account under
+          <a href="https://octopus.energy/dashboard/new/accounts/personal-details/api-access" target="_blank" rel="noopener noreferrer">Personal details → API access</a>.</p>
+        <label class="check"><input id="remember" type="checkbox"> Remember me on this device</label>
+        <p class="hint">Remembering stores Octopus’s refresh token in this browser, never your key.
+          “Sign out” forgets it.</p>
+        <div class="actions">
+          <button type="submit" class="primary">Show my bills</button>
+          <button type="button" id="demo">Try the demo</button>
+        </div>
+      </form>
+      <p class="trust"><strong>Your key goes from this browser to api.octopus.energy and nowhere else.</strong>
+        This page has no server: it is static files, and its security policy lets it connect only to Octopus.
+        The key is swapped for a short-lived token at once and not kept.</p>
+      <p class="error" id="error" role="alert" hidden></p>
+    </section>
+
+    <section id="app" hidden>
+      <div id="status" class="status" aria-live="polite"></div>
+      <div id="account-pick" hidden></div>
+      <div id="view-bills"></div>
+      <div id="view-heatmap" hidden>
+        <div id="heatmap"></div>
+      </div>
+      <button type="button" id="more" hidden>Load 12 more months</button>
+    </section>
+  </main>
+</body>
+</html>
