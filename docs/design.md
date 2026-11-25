@@ -15,7 +15,11 @@ A web page for an Octopus customer **without Home Assistant**. They paste their 
 1. **Bills.** The bill for each billing period: total, energy, standing charge, off-peak and peak
    split. Under it, one chart a day with the half-hours' kWh as bars and the rate charged as a
    stepped line. The periods are cut the way EMT's Billing tab cuts them (`web/templates/billing_module.html`):
-   Bill / Month / Quarter / Year, with *vs previous* and *vs last year*.
+   Bill / Month / Quarter / Year, with *vs previous* and *vs last year*. As in EMT: a **header bar**
+   that stays at the top (period, stepper, *Show Data*); once the bill has scrolled away, a
+   one-line **bill strip** in it with *↑ Show Bill*; each day's half-hours as a **data table**
+   (its own *☰ Data* button, or all at once from the header), with the standing charge and the
+   day's total under it; legend and hover keys drawn as a line for a rate, a block for a bar.
 2. **A data heatmap.** EMT's kWh heatmap (`web/templates/heatmap_module.html`): one row per day, one
    square per local half-hour, a month per chart, coloured by **net** kWh (import − export) with
    EMT's colour stops, and the daily net as bars beside it: one grid, as EMT's kWh heatmap.

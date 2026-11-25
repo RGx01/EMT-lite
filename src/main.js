@@ -66,6 +66,7 @@ async function forgetDevice() {
 
 /** Sign out: forget the device, and back to the sign-in page. */
 async function signOut() {
+  session++;                      // abandons a sign-in still running
   await forgetDevice();
   resetPage();
 }
@@ -109,10 +110,10 @@ function persist(extra = {}) {
   remember({ ...(remembered() || {}), rt: octo.refreshToken, rtExp: octo.refreshExp, ...extra });
 }
 
-async function start(info) {
+async function start(o, info) {
   // the device cache only when the user asked to be remembered, and never for the demo
   const cache = keep && info.number !== DEMO_NUMBER ? deviceCache() : null;
-  data = new AccountData(octo, info, cache);
+  data = new AccountData(o, info, cache);
   bills = new BillsView($('view-bills'), data, {
     // A day the user chooses holds for this visit, and is remembered with the account when the
     // browser is remembering it (design §4.4).
@@ -160,34 +161,51 @@ async function loadMonths(months) {
   $('more').hidden = false;
 }
 
+// Each sign-in (a key, a remembered token, the demo) is its own session: a later one abandons an
+// earlier one still running, which then changes nothing. Before, they shared one client, and a
+// click on Try the demo mid-sign-in sent the real sign-in on with the demo's.
+let session = 0;
+const busy = (on) => { for (const b of [$('demo'), document.querySelector('#key-form [type=submit]')]) b.disabled = on; };
+
 async function signInAndLoad(signIn) {
   showError('');
-  octo = new Octopus();
-  octo.onTokens = () => persist();
+  const my = ++session;
+  const o = new Octopus();
+  o.onTokens = () => { if (my === session) persist(); };
+  octo = o;
+  busy(true);
   try {
-    await signIn(octo);
-    const numbers = await octo.accountNumbers();
+    await signIn(o);
+    if (my !== session) return;
+    const numbers = await o.accountNumbers();
+    if (my !== session) return;
     if (!numbers.length) throw new Error('This key has no Octopus accounts.');
     signedIn('');
     const number = await pickAccount(numbers);
     persist({ account: number });
     status('Reading your account…');
-    const acc = await octo.accountInfo(number);
+    const acc = await o.accountInfo(number);
+    if (my !== session) return;
     const info = describeAccount(number, acc);
     if (!info.import) throw new Error('No electricity import meter on this account.');
     // What Octopus holds about billing, shown on the page; each is optional.
     const [trigger, payments, recent] = await Promise.all([
-      octo.billingTrigger(number).catch((e) => ({ error: e.message || 'error' })),
-      octo.paymentSchedules(number).catch(() => []),
-      octo.recentBills(number).catch(() => []),
+      o.billingTrigger(number).catch((e) => ({ error: e.message || 'error' })),
+      o.paymentSchedules(number).catch(() => []),
+      o.recentBills(number).catch(() => []),
     ]);
+    if (my !== session) return;
     info.evidence = { options: acc.billingOptions || null, trigger, payments, bills: recent };
     info.billing = chooseBilling({ userDay: remembered()?.billingDays?.[number] ?? null, info, trigger });
     $('who').textContent = number;
-    await start(info);
+    busy(false);
+    await start(o, info);
   } catch (e) {
+    if (my !== session) return;
     resetPage();
     showError(e.message || String(e));
+  } finally {
+    if (my === session) busy(false);
   }
 }
 
@@ -203,10 +221,12 @@ $('key-form').addEventListener('submit', (e) => {
 
 $('demo').addEventListener('click', async () => {
   showError('');
+  session++;                      // abandons a sign-in still running
   keep = false;
-  octo = new DemoOctopus();
+  const o = new DemoOctopus();
+  octo = o;
   signedIn('Demo account (made-up figures)');
-  await start(demoAccountInfo());
+  await start(o, demoAccountInfo());
 });
 
 $('forget').addEventListener('click', signOut);

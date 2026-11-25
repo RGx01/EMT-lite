@@ -7,6 +7,7 @@ import {
 } from 'chart.js';
 import { billPeriods, calendarPeriods, previousOf, lastYearOf, periodLabel } from './periods.js';
 import { summarise, pounds } from './bill.js';
+import { vatRate } from './vat.js';
 import { rateLine, solid, sideRateLine, exportRateLine } from './rates.js';
 import { daysBetween, slotsOfDay, todayKey, parseKey, addDays } from './time.js';
 
@@ -20,6 +21,26 @@ const PALETTE = {
   other: '#F0E442', unsplit: '#999999',        // yellow, grey
   evRate: '#CC79A7',                           // reddish purple; the House / overall rate is the text colour
 };
+
+// Legend and tooltip keys (EMT's keyMark): a rate a short line, a bar a block.
+const KEY_W = 22, KEY_H = 12;
+const keyMarks = new Map();
+function keyMark(ds) {
+  const rate = !!ds._rate, color = rate ? ds.borderColor : ds.backgroundColor;
+  const k = `${rate ? 'r' : 'b'}${color}${rate ? ds.borderWidth : ''}`;
+  if (keyMarks.has(k)) return keyMarks.get(k);
+  const c = document.createElement('canvas');
+  c.width = KEY_W; c.height = KEY_H;
+  const x = c.getContext('2d');
+  if (rate) {
+    x.strokeStyle = color; x.lineWidth = Math.min(4, ds.borderWidth || 2);
+    x.beginPath(); x.moveTo(0, KEY_H / 2); x.lineTo(KEY_W, KEY_H / 2); x.stroke();
+  } else {
+    x.fillStyle = color; x.fillRect((KEY_W - 14) / 2, 1, 14, KEY_H - 2);
+  }
+  keyMarks.set(k, c);
+  return c;
+}
 
 const MODES = [['bill', 'Bill'], ['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year']];
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -41,6 +62,7 @@ export class BillsView {
     this.mode = data.info.billing ? 'bill' : 'month';
     this.sel = null;
     this.prompt = null;          // the billing-day form, while open: { value, focus }
+    this.showData = false;       // every day's data table open (the header's Show Data)
     this.evidenceOpen = false;
     this.charts = [];
     this.observer = null;
@@ -60,15 +82,20 @@ export class BillsView {
     this.destroyCharts();
     this.root.replaceChildren();
     const list = this.periods();
-    const bar = el('div', 'bills-bar');
+
+    // The header bar (EMT's period-nav): sticks to the top of the page while the days scroll.
+    const head = el('div', 'bills-head');
+    const row = el('div', 'bills-head-row');
+    const modes = el('div', 'bills-modes');
     for (const [m, lab] of MODES) {
       const b = el('button', `mode${m === this.mode ? ' active' : ''}`, lab);
       b.type = 'button';
       b.addEventListener('click', () => { this.mode = m; this.sel = null; this.render(); });
-      bar.append(b);
+      modes.append(b);
     }
-    this.root.append(bar);
-
+    row.append(modes);
+    head.append(row);
+    this.root.append(head);
     if (!list.length) { this.root.append(el('p', 'muted', 'No data loaded yet.')); return; }
 
     let idx = list.findIndex((p) => p.start === this.sel);
@@ -76,7 +103,7 @@ export class BillsView {
     const p = list[idx];
     this.sel = p.start;
 
-    const nav = el('div', 'bills-nav');
+    const stepper = el('div', 'bills-stepper');
     const prev = el('button', null, '‹'), next = el('button', null, '›');
     prev.type = next.type = 'button';
     prev.disabled = idx === 0;
@@ -86,6 +113,7 @@ export class BillsView {
     prev.addEventListener('click', () => { this.sel = list[idx - 1].start; this.render(); });
     next.addEventListener('click', () => { this.sel = list[idx + 1].start; this.render(); });
     const select = el('select');
+    select.setAttribute('aria-label', 'Period');
     list.forEach((q, i) => {
       const o = el('option', null, periodLabel(q, this.mode));
       o.value = q.start;
@@ -93,7 +121,31 @@ export class BillsView {
       select.append(o);
     });
     select.addEventListener('change', () => { this.sel = select.value; this.render(); });
-    nav.append(prev, select, next);
+    stepper.append(prev, select, next);
+    row.append(stepper);
+
+    // Show / Hide Data: every day's half-hour table at once (each day has its own button too)
+    const dataBtn = el('button', `mode${this.showData ? ' active' : ''}`, this.showData ? 'Hide Data' : 'Show Data');
+    dataBtn.type = 'button';
+    dataBtn.title = 'Show or hide every day’s data table';
+    dataBtn.addEventListener('click', () => {
+      this.showData = !this.showData;
+      dataBtn.textContent = this.showData ? 'Hide Data' : 'Show Data';
+      dataBtn.classList.toggle('active', this.showData);
+      for (const box of this.root.querySelectorAll('.day')) this.toggleTable(box, this.showData);
+    });
+    row.append(dataBtn);
+
+    // The bill strip: once the bill has scrolled away, one line in the header with Show Bill
+    const strip = el('div', 'bill-strip');
+    strip.hidden = true;
+    const stripLabel = el('span', 'bill-strip-label');
+    const showBill = el('button', null, '↑ Show Bill');
+    showBill.type = 'button';
+    strip.append(stripLabel, showBill);
+    head.append(strip);
+
+    const where = el('div', 'bills-where');
     if (this.mode === 'bill') {
       const src = this.data.info.billing.source;
       const nth = ordinal(this.data.info.billing.day);
@@ -104,20 +156,96 @@ export class BillsView {
       change.type = 'button';
       change.addEventListener('click', () => {
         this.prompt = { value: String(this.data.info.billing?.day ?? 1), focus: true };
-        nav.after(this.billingDayPrompt());
+        where.after(this.billingDayPrompt());
       });
-      nav.append(change);
+      where.append(change);
     }
-    this.root.append(nav);
+    this.root.append(where);
     // a redraw (each month that loads) keeps an open form and fold-out as they were
-    if (this.mode === 'bill' && this.prompt) nav.after(this.billingDayPrompt());
+    if (this.mode === 'bill' && this.prompt) where.after(this.billingDayPrompt());
     if (this.mode === 'bill' && this.data.info.evidence) this.root.append(this.evidence());
 
     const d = this.data;
     const sum = (q) => q && summarise(q, d.impDays, d.impCover, d.expDays, d.expCover);
     const s = sum(p), sp = sum(previousOf(list, p)), sy = sum(lastYearOf(list, p));
-    this.root.append(this.card(p, s, sp, sy));
+    const card = this.card(p, s, sp, sy);
+    this.root.append(card);
     this.root.append(this.days(p));
+
+    stripLabel.textContent = `Bill — ${periodLabel(p, this.mode)} | ${pounds(s.net)}${s.finished ? '' : ' so far'}`;
+    showBill.addEventListener('click', () => card.scrollIntoView({ behavior: 'smooth', block: 'start' }));
+    this.stripObserver?.disconnect();
+    this.stripObserver = new IntersectionObserver(([e]) => {
+      strip.hidden = e.isIntersecting || e.boundingClientRect.top > 0;
+    }, { rootMargin: `-${head.offsetHeight}px 0px 0px 0px` });
+    this.stripObserver.observe(card);
+  }
+
+  /** Open or close one day's data table, building it the first time. */
+  toggleTable(box, force) {
+    const tbl = box.querySelector('.day-table'), btn = box.querySelector('.day-table-btn');
+    const open = force !== undefined ? force : tbl.hidden;
+    if (open && !tbl.dataset.built) { tbl.append(this.dayTable(box.dataset.day)); tbl.dataset.built = '1'; }
+    tbl.hidden = !open;
+    btn.classList.toggle('active', open);
+  }
+
+  /** A day's half-hours as a table: import (and Octopus's House / EV split), export, the rate. */
+  dayTable(k) {
+    const slots = [...slotsOfDay(k)].sort((a, b) => a - b);
+    const day = this.data.impDays.get(k), eday = this.data.expDays?.get(k);
+    const v = 1 + vatRate(k);
+    const split = slots.some((s) => day?.get(s)?.split);
+    const t = el('table', 'day-data');
+    const head = ['Time', 'Import kWh', 'Rate p/kWh', 'Import £'];
+    if (split) head.push('House kWh', 'House £', 'EV kWh', 'EV £');
+    if (eday) head.push('Export kWh', 'Export p/kWh', 'Export £');
+    const thead = el('thead'), hr = el('tr');
+    for (const h of head) hr.append(el('th', null, h));
+    thead.append(hr);
+    t.append(thead);
+    const tb = el('tbody');
+    const tot = new Array(head.length).fill(0);
+    const side = (iv, sd) => {
+      if (!iv?.split) return [null, null];
+      let k2 = 0, c = 0;
+      for (const [key, e] of Object.entries(iv.split)) if (key.startsWith(`${sd}:`)) { k2 += e.kwh; c += e.cost; }
+      return [k2, c * v];
+    };
+    const f = (x, dp) => (x == null ? '—' : x.toFixed(dp));
+    for (const s of slots) {
+      const iv = day?.get(s), ev = eday?.get(s);
+      const cost = iv?.costExc != null ? iv.costExc * v : null;
+      const cells = [fmtSlot(s), iv ? iv.kwh : null, cost != null && iv.kwh > 0.0005 ? cost / iv.kwh : null, cost != null ? cost / 100 : null];
+      if (split) { const [hk, hc] = side(iv, 'home'), [ek, ec] = side(iv, 'ev'); cells.push(hk, hc != null ? hc / 100 : null, ek, ec != null ? ec / 100 : null); }
+      if (eday) {
+        const pay = ev?.costExc != null ? Math.abs(ev.costExc) : null;
+        cells.push(ev ? ev.kwh : null, pay != null && ev.kwh > 0.0005 ? pay / ev.kwh : null, pay != null ? pay / 100 : null);
+      }
+      const tr = el('tr');
+      cells.forEach((c, i) => {
+        if (i === 0) { tr.append(el('td', null, c)); return; }
+        const isRate = head[i].includes('p/kWh'), isMoney = head[i].endsWith('£');
+        tr.append(el('td', 'num', f(c, isRate ? 2 : isMoney ? 4 : 3)));
+        if (!isRate && c != null) tot[i] += c;
+      });
+      tb.append(tr);
+    }
+    t.append(tb);
+    const tf = el('tfoot'), fr = el('tr');
+    head.forEach((h, i) => {
+      if (i === 0) { fr.append(el('td', null, 'Total')); return; }
+      fr.append(el('td', 'num', h.includes('p/kWh') ? '' : f(tot[i], h.endsWith('£') ? 2 : 3)));
+    });
+    tf.append(fr);
+    t.append(tf);
+    const wrap = el('div', 'day-data-wrap');
+    wrap.append(t);
+    // the day header's £ is energy and standing charge together: say so under the table
+    const sd = summarise({ start: k, end: addDays(k, 1) }, this.data.impDays, this.data.impCover, this.data.expDays, this.data.expCover);
+    wrap.append(el('p', 'day-data-note', `Standing charge ${pounds(sd.standing)} · day total ${pounds(sd.total)}`
+      + `${sd.exportCredit ? ` · after export ${pounds(sd.net)}` : ''} · £ include VAT on import, none on export.`));
+    return wrap;
   }
 
   /** What Octopus holds about billing, so the billing day can be traced to its source. */
@@ -263,7 +391,16 @@ export class BillsView {
       );
       const holder = el('div', 'day-chart');
       holder.append(el('canvas'));
-      box.append(head, holder);
+      const tbl = el('div', 'day-table');
+      tbl.hidden = true;
+      const bar = el('div', 'day-toolbar');
+      const btn = el('button', 'day-table-btn', '☰ Data');
+      btn.type = 'button';
+      btn.title = 'Show or hide this day’s half-hours';
+      btn.addEventListener('click', () => this.toggleTable(box));
+      bar.append(btn);
+      box.append(head, holder, tbl, bar);
+      if (this.showData) this.toggleTable(box, true);
       wrap.append(box);
       this.observer.observe(box);
     }
@@ -279,7 +416,7 @@ export class BillsView {
     const iv = (s) => day?.get(s);
     const bar = (label, color, value) => ({ type: 'bar', label, yAxisID: 'kwh', order: 2, stack: 'kwh',
       backgroundColor: color, data: slots.map(value) });
-    const line = (label, color, rates) => ({ type: 'line', label, yAxisID: 'rate', order: 1,
+    const line = (label, color, rates) => ({ type: 'line', label, yAxisID: 'rate', order: 1, _rate: true,
       data: slots.map((s) => rates.get(s)), stepped: 'middle', borderColor: color, borderWidth: 2,
       pointRadius: 0, spanGaps: true, borderDash: [] });
     const datasets = [];
@@ -345,8 +482,14 @@ export class BillsView {
             ticks: { color: text, stepSize: 5, callback: (v) => (v < 0 || Math.abs(v % 5) > 1e-6 ? '' : v) }, grid: { display: false } },
         },
         plugins: {
-          legend: { labels: { color: text, boxWidth: 12 } },
-          tooltip: { callbacks: { label: (c) => (c.parsed.y == null ? null
+          // A rate's key is a line and a bar's a block, the same in the legend and the hover
+          // (EMT's keyMark): Chart.js would draw a line's key as a box.
+          legend: { labels: { color: text, usePointStyle: true, pointStyleWidth: KEY_W,
+            generateLabels: (ch) => Chart.defaults.plugins.legend.labels.generateLabels(ch).map((it) => (
+              { ...it, pointStyle: keyMark(ch.data.datasets[it.datasetIndex]) })) } },
+          tooltip: { usePointStyle: true, boxWidth: KEY_W, boxHeight: KEY_H, callbacks: {
+            labelPointStyle: (c) => ({ pointStyle: keyMark(c.dataset), rotation: 0 }),
+            label: (c) => (c.parsed.y == null ? null
             : `${c.dataset.label}: ${Math.abs(c.parsed.y).toFixed(c.dataset.yAxisID === 'rate' ? 2 : 3)}`) } },
         },
       },
@@ -358,6 +501,7 @@ export class BillsView {
     for (const c of this.charts) c.destroy();
     this.charts = [];
     this.observer?.disconnect();
+    this.stripObserver?.disconnect();
   }
 }
 
