@@ -41,7 +41,8 @@ A web page for an Octopus customer **without Home Assistant**. They paste their 
 **Around the page.** The page's own header bar (EMT-Lite, the account, Bills / Heatmap, Sign out)
 stays at the top on every view; the bills' bar sticks just under it. On a wide screen the header
 bar also says *Got Home Assistant? Try EMT for a richer experience*, linking to Home Assistant's
-add-repository page for EMT and to EMT on GitHub. The footer carries the same, for narrow screens,
+add-repository page for EMT and to EMT on GitHub. The footer bar, always in view at the bottom of
+the window, carries the same, for narrow screens,
 and a link to this repository's issues, for problems and suggestions (it works for others only
 once the repository is public).
 
