@@ -1,6 +1,6 @@
 # EMT-Lite — billing charts and a missing-data heatmap in the browser
 
-*Design, 25 Nov 2026. **Draft — not decided, not built.** Almost everything it knows about Octopus,
+*Design, 25 Nov 2026. **Draft, not built.** Its six open questions were decided on 25 Nov 2026 (§9). Almost everything it knows about Octopus,
 EMT learned first: a file named here without a repository (`kraken_api_client.py`,
 `web/templates/heatmap_module.html`, …) is in [RGx01/EMT](https://github.com/RGx01/EMT).
 This repository is private while the design is drafted, and goes public before the first user
@@ -17,8 +17,11 @@ A web page for an Octopus customer **without Home Assistant**. They paste their 
    stepped line. The periods are cut the way EMT's Billing tab cuts them (`web/templates/billing_module.html`):
    Bill / Month / Quarter / Year, with *vs previous* and *vs last year*.
 2. **A data heatmap.** EMT's kWh heatmap (`web/templates/heatmap_module.html`): one row per day, one
-   square per local half-hour, a month per chart. A half-hour that Octopus has **no reading for** is
-   drawn **black and white hatched**.
+   square per local half-hour, a month per chart, coloured by the half-hour's kWh with EMT's colour
+   stops, and the daily total as bars beside it. A half-hour that Octopus has **no reading for** is
+   drawn **black and white hatched**. An account with an export meter gets an Import / Export
+   toggle. Each side is its own grid with its own gaps, since the two meters' readings arrive
+   separately.
 
 What it is not: no live power, no devices or EV split, no Data Management, no corrections, no bill
 PDFs, no carbon. It shows what Octopus holds, and the gaps in it.
@@ -53,13 +56,14 @@ Static hosting, free tier. Any of these will do:
 
 | host | for | against |
 |---|---|---|
-| **Cloudflare Pages** (proposed) | free with no commercial-use limit; a `_headers` file sets CSP and the rest per path; deploys from a GitHub repo | one more account |
+| **Cloudflare Pages** (decided) | free with no commercial-use limit; a `_headers` file sets CSP and the rest per path; deploys from a GitHub repo | one more account |
 | GitHub Pages | the repository is already there | **cannot set response headers**: CSP only by `<meta>`, which cannot carry `frame-ancestors` |
 | Vercel | easy; `vercel.json` sets headers | Hobby (free) is non-commercial only; its strength (functions) is what we do not want |
 | Netlify | `_headers` like Cloudflare | no advantage over Cloudflare here |
 
-**Proposed: Cloudflare Pages**, built from the EMT-Lite repository's `main`. A custom domain is
-optional. The `*.pages.dev` address works.
+**Decided: Cloudflare Pages**, built from the EMT-Lite repository's `main`, launched as
+**EMT-Lite** on its free `*.pages.dev` address (for example `emt-lite.pages.dev`, if free). A custom
+domain can be added later without changing anything else.
 
 ## 4. Security
 
@@ -75,9 +79,11 @@ optional. The `*.pages.dev` address works.
 3. **The key is swapped for a token at once.** `obtainKrakenToken(input: {APIKey})` returns a token
    (about an hour) and a refresh token. The page keeps the token and refresh token **in memory**
    and drops the key. Closing the tab forgets everything.
-4. **"Remember me" is opt-in** and says what it does: the *refresh token* (not the key) in
-   `localStorage`, with a "Forget me" button that clears it and the cache (§6). *Open: whether to
-   offer this at all (§9).*
+4. **"Remember me" is an opt-in tickbox** and says what it does: it stores the *refresh token*
+   (never the key) in `localStorage`, with a "Forget me" button that clears it and the cache (§6).
+   When the refresh token expires, the user pastes the key again. *Its lifetime is not known yet:
+   check it with a real key when built, and state it beside the tickbox.* Rejected: storing the key
+   encrypted under a passphrase, which adds a password to forget and more code for little gain.
 5. **Nothing reaches the URL.** Not the key, account, MPAN or dates: they would land in history and
    in `Referer`. Also `Referrer-Policy: no-referrer`.
 6. Other headers: `Strict-Transport-Security`, `X-Content-Type-Options: nosniff`,
@@ -96,8 +102,9 @@ introspection on 25 Nov 2026.
 
 - **Account:** `viewer { accounts { number } }`. The key is enough. If there is more than one
   account, the user picks one.
-- **Meters:** the account's electricity meter points, with their agreements. Import is required,
-  export is optional (§9). The active meter is picked as EMT's `_pick_active_meter` does, and the
+- **Meters:** the account's electricity meter points, with their agreements. Import is required.
+  **Export is fetched only when the account has an export meter point**, so an import-only account
+  pays no extra calls. With export, the bill gets an export credit line. The active meter is picked as EMT's `_pick_active_meter` does, and the
   agreement in force as `_current_agreement` does (never a zero-length blip, v5 #53).
 
 ### 5.2 The billing day
@@ -106,12 +113,14 @@ introspection on 25 Nov 2026.
 `periodLengthMultiplier`, `isFixed`, `currentBillingPeriodStartDate` and
 `currentBillingPeriodEndDate`.
 
-1. If `periodLength` is `MONTHLY` and `periodStartDay` is set, use it. *Not yet tried with a real
-   key: the first job when built.*
+1. If `periodStartDay` is set, use it. *Not yet tried with a real key: the first job when
+   built.*
 2. If not, take the start day of `account.bills`.
 3. If neither works, ask the user, store the answer with the cache (§6), and let them change it.
 
-`QUARTERLY` bills: the Bill view cuts quarters from `currentBillingPeriodStartDate`. *Open (§9).*
+**Monthly and quarterly use one rule.** Bill periods are cut backwards (and forwards) from
+`currentBillingPeriodStartDate` in steps of `periodLength` × `periodLengthMultiplier` months. With
+no `currentBillingPeriodStartDate`, a monthly cut from the billing day found above is used.
 
 ### 5.3 The half-hours, with their cost
 
@@ -134,8 +143,25 @@ What EMT learned the hard way, which EMT-Lite starts with:
   **Do not use `costInclTax`**: Octopus's half-hourly figures carried 5% after the change (v4
   #505).
 
-The REST `/consumption/` endpoint is not needed: `measurements` has the kWh too. *Open: whether
-REST is cheaper against the rate limit for heatmap-only months (§9).*
+The REST `/consumption/` endpoint is not needed: `measurements` has the kWh too. *Still open:
+whether REST is cheaper against the rate limit for months that are only needed for the heatmap
+(§9).*
+
+### 5.5 The rate line
+
+The day chart's rate for each half-hour is what Octopus charged:
+`costExclTax ÷ kWh`, with VAT added from the calendar (§5.3).
+
+- **A half-hour with no kWh** has no cost to divide. It takes the rate of that day's half-hours with
+  the same Octopus label (`OFF_PEAK` or `STANDARD_RATE`). If none of the day's half-hours has that
+  label, it has no point and the line has a gap.
+- **Agile** prices every half-hour differently, so the label does not fill gaps. For an Agile
+  agreement, the page also fetches the tariff's published unit rates
+  (`/v1/products/{product}/electricity-tariffs/{tariff}/standard-unit-rates/`, using
+  `value_exc_vat` and the VAT calendar). That endpoint is public and needs no key. Those rates fill
+  the zero-kWh half-hours. Where kWh is not zero, the charged rate still comes from the cost.
+- Rejected: published rates for every account. They miss Intelligent's dispatch off-peak
+  half-hours, which only Octopus's labels carry.
 
 ### 5.4 Rate limits
 
@@ -182,12 +208,22 @@ deletes the database.
 - **`costInclTax` as the bill.** See §5.3.
 - **A backend database of users' data.** IndexedDB on their device is enough.
 
-## 9. Open questions
+## 9. Decisions and open questions
 
-1. *Remember me:* offer it (refresh token in `localStorage`), or memory-only always?
-2. Export (`GENERATION`) in v1? It adds a second fetch per month and an export line on the bill.
-3. Quarterly billing: cut from `currentBillingPeriodStartDate`, or leave it out of v1?
-4. Fixed-rate and Agile accounts: the day chart's rate line comes from cost ÷ kWh per
-   half-hour. Is that good enough, or fetch the tariff's published rates?
-5. Name and domain.
-6. Should the heatmap's cell show the kWh value or a *how complete* tint? Proposed: kWh, as EMT.
+Decided on 25 Nov 2026:
+
+| question | decided | where |
+|---|---|---|
+| Remember me | opt-in tickbox storing the refresh token, never the key; "Forget me" clears it | §4.4 |
+| Export | in v1, fetched only when the account has an export meter point | §1, §5.1 |
+| Quarterly billing | supported: monthly and quarterly cut by one rule | §5.2 |
+| Rate line | cost ÷ kWh; zero-kWh half-hours take the day's rate for their label; Agile also fetches its public rates | §5.5 |
+| Name and address | EMT-Lite on a free `*.pages.dev` address; a custom domain later if wanted | §3 |
+| Heatmap colour | kWh with EMT's colour stops, hatched where missing, daily totals beside | §1 |
+
+Still open:
+
+1. Whether the REST `/consumption/` endpoint costs less of the rate limit than `measurements` for
+   months that are only needed for the heatmap (§5.3).
+2. The refresh token's lifetime (§4.4) and whether `periodStartDay` is filled in (§5.2). Both are
+   checked with a real key, first thing when built.
