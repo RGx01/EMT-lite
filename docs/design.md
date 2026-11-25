@@ -154,12 +154,19 @@ per interval.
 
 What EMT learned the hard way, which EMT-Lite starts with:
 
-- **Ask exact local months**, from local midnight on the 1st. A padded window comes back with
-  **no cost**, and narrow windows mislabel the middle of a long smart charge.
-- If a month leaves half-hours without a cost, ask those **local days**. If a day still leaves
-  some, ask noon to noon (EMT's `recover_measurement_costs`). If that still leaves any, they are
-  shown as *kWh, no cost from Octopus*.
-- **Page size 500.** A month is about 1,490 intervals, so 3 pages.
+- **Ask windows of whole local days, at most 10** (25 Nov 2026), each starting and ending at a
+  local midnight. A padded window comes back with **no cost**, and narrow windows mislabel the
+  middle of a long smart charge. Small asks are what EMT found reliable: its 60-day asks timed
+  out where 30-day ones landed. Ten days is at most 482 half-hours, one 500-row page.
+- **Recover what a window leaves without a cost**, in EMT's order (`recover_measurement_costs`):
+  each half-hour's local **day**, then its local **month**, then **noon to noon** (the previous
+  noon to this noon before midday, else this noon to the next). On some days Octopus costs nothing
+  in any window that *starts* at that day's midnight, whatever its end; a window with no costs at
+  all is therefore recovered too. Not asked: the last three days (not priced yet) and days before
+  the supply started. What is still left is shown as *kWh, no cost from Octopus*. On the first
+  real account, August to October left 175–366 half-hours a month without a cost; recovery
+  costed all of them, about a quarter by the month and noon to noon after the day.
+- **Page size 500.**
 - **VAT:** compute the VAT-inclusive cost from `costExclTax` and EMT's VAT calendar
   (`vat_calendar.py`: 5% up to 30 Sep 2026, 0% from 1 Oct 2026, at local midnight).
   **Do not use `costInclTax`**: Octopus's half-hourly figures carried 5% after the change (v4
@@ -201,15 +208,15 @@ experience is that the limit is shared by everything using the account. A user r
 Octopus's app, takes from the same pot.
 
 - Requests are paced (400 ms between starts), with EMT's backoff on the rate-limit error `KT-CT-1199`.
-- Months come **newest first**, **three at a time**, each month's import and export together
-  (25 Nov 2026). Octopus takes seconds over each page (about 5 s for an IOG-SMB import page of 500
-  half-hours, 1.5 s for export), so one at a time took about 3½ minutes for 13 months; overlapped,
-  about 45 s, with the same number of calls. A month is shown only once it and every newer month
-  are in, so a month still loading never appears as gaps.
+- At most **four requests in flight**. Months come **newest first**, three at a time, each
+  month's windows for import and export together. A month is shown only once it and every newer
+  month are in, so a month still loading never appears as gaps.
 - The query asks only `costExclTax` (VAT comes from the calendar), not `costInclTax`.
-- Cost recovery (§5.3) is not asked for the last three days, for days before the supply started,
-  or for a month Octopus priced nothing in. On the first real account the months before its
-  Octopus supply cost two requests a day each, about 90 a month, for nothing.
+- Measured on the first real account (IOG-SMB with export, 25 Nov 2026): one request at a time,
+  month windows, about 3½ minutes for 13 months (an import page took about 5 s). Now about 90 s
+  and 216 requests, of which about 80 fetch and the rest recover costs; each request about 1 s.
+  The 400 ms between starts is now the limit. Re-fetching settled months on every visit is the
+  waste left: §6's cache is the next saving.
 - **History depth defaults to 13 months** (enough for *vs last year*). "Load more" goes further.
 
 ## 6. Cache

@@ -95,3 +95,24 @@ export function isoLocal(ms) {
 }
 
 export function todayKey(now = Date.now()) { return dayKeyOf(now); }
+
+/** The UTC instant of local noon on day key `k`. */
+export function noon(k) {
+  const m = midnight(k), guess = m + 12 * 3600000;
+  return guess + (offsetMinutes(m) - offsetMinutes(guess)) * 60000;
+}
+
+/** [start, end) local days cut into windows of at most `maxDays`, as even as they divide.
+ *  Each starts and ends at a local midnight (design §5.3). */
+export function dayWindows(start, end, maxDays = 10) {
+  const days = daysBetween(start, end);
+  const n = Math.max(1, Math.ceil(days.length / maxDays));
+  const out = [];
+  let i = 0;
+  for (let w = 0; w < n; w++) {
+    const size = Math.ceil((days.length - i) / (n - w));
+    out.push({ start: days[i], end: i + size < days.length ? days[i + size] : end });
+    i += size;
+  }
+  return out;
+}

@@ -413,8 +413,8 @@ describe('export rate rounding', () => {
 import { AccountData } from '../src/data.js';
 
 describe('loading months several at a time', () => {
-  // A fake Octopus whose answers arrive in a set order, whatever order they were asked in.
-  function fake(order) {
+  // A fake Octopus whose answers arrive only when released, whatever order they were asked in.
+  function fake() {
     const waiting = new Map();
     const octo = {
       calls: [],
@@ -425,18 +425,20 @@ describe('loading months several at a time', () => {
       measurementsBetween: async () => [],
       publishedRates: async () => [],
     };
-    const release = async (k) => { waiting.get(k)(); await new Promise((r) => setTimeout(r, 0)); };
-    return { octo, release, order };
+    const release = async (...ks) => { for (const k of ks) waiting.get(k)(); await new Promise((r) => setTimeout(r, 0)); };
+    return { octo, release };
   }
   const info = { number: 'A-0000ABC7', import: { mpan: 'I', agreements: [], from: null }, export: { mpan: 'E', agreements: [], from: null }, billing: null };
+  const NOV = ['2026-11-01', '2026-11-11', '2026-11-21'], OCT = ['2026-10-01', '2026-10-09', '2026-10-17', '2026-10-25'];
+  const all = (days) => days.flatMap((d) => [`I:${d}`, `E:${d}`]);
 
-  it('asks for import and export at the same time', async () => {
+  it('asks a month as windows of at most 10 days, import and export at the same time', async () => {
     const { octo, release } = fake();
     const d = new AccountData(octo, info);
     const p = d.loadMonth({ start: '2026-11-01', end: '2026-12-01' });
     await new Promise((r) => setTimeout(r, 0));
-    expect(octo.calls).toEqual(['I:2026-11-01', 'E:2026-11-01']);
-    await release('I:2026-11-01'); await release('E:2026-11-01');
+    expect(octo.calls.sort()).toEqual(all(NOV).sort());
+    await release(...all(NOV));
     await p;
     expect(d.loaded).toEqual(['2026-11-01']);
   });
@@ -447,32 +449,73 @@ describe('loading months several at a time', () => {
     const nov = d.loadMonth({ start: '2026-11-01', end: '2026-12-01' });
     const oct = d.loadMonth({ start: '2026-10-01', end: '2026-11-01' });
     await new Promise((r) => setTimeout(r, 0));
-    await release('I:2026-10-01'); await release('E:2026-10-01'); await oct;
+    await release(...all(OCT)); await oct;
     expect(d.shownMonths(today)).toEqual([]);                 // October is in, November is not
-    await release('I:2026-11-01'); await release('E:2026-11-01'); await nov;
+    await release(...all(NOV)); await nov;
     expect(d.shownMonths(today).map((m) => m.start)).toEqual(['2026-11-01', '2026-10-01']);
+  });
+});
+
+import { dayWindows, noon } from '../src/time.js';
+
+describe('10-day windows', () => {
+  it('a 31-day month is four windows from local midnights, none over 10 days', () => {
+    const ws = dayWindows('2026-10-01', '2026-11-01', 10);
+    expect(ws.map((w) => w.start)).toEqual(['2026-10-01', '2026-10-09', '2026-10-17', '2026-10-25']);
+    expect(ws.at(-1).end).toBe('2026-11-01');
+    for (const w of ws) expect((midnight(w.end) - midnight(w.start)) / HALF_HOUR).toBeLessThanOrEqual(500);
+  });
+  it('local noon is 11:00Z in summer and 12:00Z in winter', () => {
+    expect(new Date(noon('2026-07-01')).toISOString()).toBe('2026-07-01T11:00:00.000Z');
+    expect(new Date(noon('2026-12-01')).toISOString()).toBe('2026-12-01T12:00:00.000Z');
   });
 });
 
 import { recoverCosts } from '../src/octopus.js';
 
-describe('cost recovery asks only where it can help', () => {
+describe('cost recovery, in EMT\u2019s order', () => {
   const now = Date.parse('2026-11-25T12:00:00Z');
-  const counting = () => { const o = { n: 0, measurements: async () => { o.n++; return []; }, measurementsBetween: async () => { o.n++; return []; } }; return o; };
-  const iv = (k, cost) => ({ start: midnight(k) + 20 * HALF_HOUR, kwh: 0.5, costExc: cost });
-  it('a month Octopus priced nothing in is not asked again', async () => {
-    const o = counting();
-    await recoverCosts(o, 'A', 'M', [iv('2026-03-03', null), iv('2026-03-04', null)], 'CONSUMPTION', dayKeyOf, now);
-    expect(o.n).toBe(0);
+  // records each window asked, as local ISO pairs; answers with costs only for `costs` windows
+  const recorder = (costs = new Map()) => {
+    const o = { asked: [],
+      measurementsBetween: async (_n, _m, a, b) => { o.asked.push([isoLocal(a), isoLocal(b)]); return costs.get(`${a}`) || []; } };
+    return o;
+  };
+  const iv = (k, slot, cost) => ({ start: midnight(k) + slot * HALF_HOUR, kwh: 0.5, costExc: cost, split: null });
+
+  it('a window with no costs at all is still recovered (a midnight start can cost nothing)', async () => {
+    const o = recorder();
+    await recoverCosts(o, 'A', 'M', [iv('2026-04-24', 4, null)], 'CONSUMPTION', dayKeyOf, now, '2026-01-01');
+    expect(o.asked.length).toBe(3);
   });
-  it('days before the supply started are not asked', async () => {
-    const o = counting();
-    await recoverCosts(o, 'A', 'M', [iv('2026-06-02', null), iv('2026-06-10', 5)], 'CONSUMPTION', dayKeyOf, now, '2026-06-04');
-    expect(o.n).toBe(0);
+  it('asks the day, then the month, then noon to noon: the noon before for a morning half-hour', async () => {
+    const o = recorder();
+    await recoverCosts(o, 'A', 'M', [iv('2026-04-24', 4, null)], 'CONSUMPTION', dayKeyOf, now, '2026-01-01');
+    expect(o.asked).toEqual([
+      ['2026-04-24T00:00:00+01:00', '2026-04-25T00:00:00+01:00'],
+      ['2026-04-01T00:00:00+01:00', '2026-05-01T00:00:00+01:00'],
+      ['2026-04-23T12:00:00+01:00', '2026-04-24T12:00:00+01:00'],
+    ]);
   });
-  it('a hole among priced days is asked: the day, then noon to noon', async () => {
-    const o = counting();
-    await recoverCosts(o, 'A', 'M', [iv('2026-06-12', null), iv('2026-06-10', 5)], 'CONSUMPTION', dayKeyOf, now, '2026-06-04');
-    expect(o.n).toBe(3);
+  it('an afternoon half-hour is asked from that noon to the next', async () => {
+    const o = recorder();
+    await recoverCosts(o, 'A', 'M', [iv('2026-04-24', 30, null)], 'CONSUMPTION', dayKeyOf, now, '2026-01-01');
+    expect(o.asked.at(-1)).toEqual(['2026-04-24T12:00:00+01:00', '2026-04-25T12:00:00+01:00']);
+  });
+  it('stops once a window has the cost, and carries the split with it', async () => {
+    const day = midnight('2026-04-24');
+    const got = [{ start: day + 4 * HALF_HOUR, kwh: 0.5, costExc: 3.5, standingExc: 1, offPeak: true, split: { 'ev:off': { kwh: 0.5, cost: 3.5 } } }];
+    const o = recorder(new Map([[`${day}`, got]]));
+    const ivs = [iv('2026-04-24', 4, null)];
+    await recoverCosts(o, 'A', 'M', ivs, 'CONSUMPTION', dayKeyOf, now, '2026-01-01');
+    expect(o.asked.length).toBe(1);
+    expect(ivs[0].costExc).toBe(3.5);
+    expect(ivs[0].split['ev:off'].kwh).toBe(0.5);
+  });
+  it('days before the supply started, and the last three days, are not asked', async () => {
+    const o = recorder();
+    await recoverCosts(o, 'A', 'M', [iv('2026-06-02', 4, null), iv('2026-11-24', 4, null)], 'CONSUMPTION', dayKeyOf, now, '2026-06-04');
+    expect(o.asked.length).toBe(0);
   });
 });
+

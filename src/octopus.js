@@ -5,12 +5,13 @@
 // (about an hour) and the refresh token. No mutation other than obtainKrakenToken is ever sent.
 
 import { parseNode } from './measurements.js';
-import { isoLocal, midnight, addDays, TZ } from './time.js';
+import { isoLocal, midnight, addDays, addMonths, parseKey, noon, TZ } from './time.js';
 
 const GQL = 'https://api.octopus.energy/v1/graphql/';
 const REST = 'https://api.octopus.energy/v1';
 const RETRY_DELAYS = [1000, 2000, 4000, 8000];
-const PACE_MS = 400;               // between requests: one account's limit is shared (design §5.4)
+const PACE_MS = 400;               // between request starts: one account's limit is shared (design §5.4)
+const MAX_IN_FLIGHT = 4;           // small asks, a few at a time: EMT found big asks time out
 const REFRESH_SKEW_S = 120;
 
 const TOKEN_MUTATION =
@@ -90,11 +91,29 @@ export class Octopus {
 
   async _pace() {
     const wait = this._last + PACE_MS - Date.now();
+    this._last = Math.max(Date.now(), this._last + PACE_MS);     // reserve the next start
     if (wait > 0) await sleep(wait);
-    this._last = Date.now();
   }
 
-  async _post(query, variables, auth) {
+  /** Run `fn` when fewer than MAX_IN_FLIGHT requests are out. */
+  async _slot(fn) {
+    this._inFlight = this._inFlight || 0;
+    this._queue = this._queue || [];
+    if (this._inFlight >= MAX_IN_FLIGHT) await new Promise((r) => this._queue.push(r));
+    this._inFlight++;
+    try {
+      return await fn();
+    } finally {
+      this._inFlight--;
+      this._queue.shift()?.();
+    }
+  }
+
+  _post(query, variables, auth) {
+    return this._slot(() => this._postNow(query, variables, auth));
+  }
+
+  async _postNow(query, variables, auth) {
     if (/^\s*mutation\b/.test(query) && query !== TOKEN_MUTATION) {
       throw new OctopusError('EMT-Lite sends no mutations.');
     }
@@ -215,6 +234,7 @@ export class Octopus {
       if (!conn.pageInfo?.hasNextPage || !conn.pageInfo.endCursor) break;
       after = conn.pageInfo.endCursor;
     }
+
     return out;
   }
 
@@ -226,9 +246,11 @@ export class Octopus {
       + `&period_to=${encodeURIComponent(new Date(midnight(toKey)).toISOString())}`;
     for (let page = 0; url && page < 20; page++) {
       await this._pace();
-      const res = await fetch(url, { credentials: 'omit', referrerPolicy: 'no-referrer' });
-      if (!res.ok) throw new OctopusError(`Octopus answered ${res.status} for published rates.`, { status: res.status });
-      const body = await res.json();
+      const body = await this._slot(async () => {
+        const res = await fetch(url, { credentials: 'omit', referrerPolicy: 'no-referrer' });
+        if (!res.ok) throw new OctopusError(`Octopus answered ${res.status} for published rates.`, { status: res.status });
+        return res.json();
+      });
       out.push(...(body.results || []));
       url = body.next && body.next.startsWith(REST) ? body.next : null;
     }
@@ -236,14 +258,18 @@ export class Octopus {
   }
 }
 
-/** Fill costs Octopus left out of a month's answer: ask those local days, then noon to noon
- *  (EMT's recover_measurement_costs). Mutates and returns `intervals`. */
+/**
+ * Fill costs Octopus left out (EMT's recover_measurement_costs, design §5.3), in EMT's order:
+ * each half-hour's exact local DAY; what that leaves, its local MONTH; what that leaves, NOON TO
+ * NOON (the previous noon to this noon for a half-hour before midday, else this noon to the next).
+ * On some days Octopus costs nothing in any window that STARTS at that day's midnight, whatever
+ * its end, and everything in one that starts later: noon to noon recovered 57 of 72 such
+ * half-hours in EMT (18 Nov 2026). So a window with no costs at all is still worth recovering.
+ *
+ * Not asked: the last three days (usually not priced yet) and days before the supply started
+ * (another supplier's kWh: Octopus prices none of it). Mutates and returns `intervals`.
+ */
 export async function recoverCosts(octo, number, mpan, intervals, direction, dayKeyOf, now = Date.now(), supplyFrom = null) {
-  // Recovery is for the holes a month's answer leaves among costs Octopus does have. Not asked:
-  //  - the last three days, usually not priced yet;
-  //  - days before the supply started (another supplier's kWh: Octopus prices none of it);
-  //  - a month Octopus priced nothing in at all: asking day by day would find nothing either.
-  if (!intervals.some((iv) => iv.costExc != null)) return intervals;
   const recent = dayKeyOf(now - 3 * 86400000);
   const lacking = () => intervals.filter((iv) => iv.costExc == null && iv.kwh > 0 && dayKeyOf(iv.start) < recent
     && (!supplyFrom || dayKeyOf(iv.start) >= supplyFrom));
@@ -251,20 +277,40 @@ export async function recoverCosts(octo, number, mpan, intervals, direction, day
     const by = new Map(got.filter((g) => g.costExc != null).map((g) => [g.start, g]));
     for (const iv of intervals) {
       const g = by.get(iv.start);
-      if (iv.costExc == null && g) { iv.costExc = g.costExc; iv.offPeak = g.offPeak; if (iv.standingExc == null) iv.standingExc = g.standingExc; }
+      if (iv.costExc == null && g) {
+        iv.costExc = g.costExc;
+        iv.offPeak = g.offPeak;
+        iv.split = g.split;
+        if (iv.standingExc == null) iv.standingExc = g.standingExc;
+      }
     }
   };
-  for (const k of new Set(lacking().map((iv) => dayKeyOf(iv.start)))) {
-    merge(await octo.measurements(number, mpan, k, addDays(k, 1), direction));
-  }
-  // noon to noon: the half of the day before midday from the previous noon, the rest to the next
-  const NOON = 12 * 3600 * 1000;
-  for (const k of new Set(lacking().map((iv) => dayKeyOf(iv.start)))) {
-    const m0 = midnight(k);
-    merge(await octo.measurementsBetween(number, mpan, m0 - NOON, m0 + NOON, direction));
-    if (lacking().some((iv) => dayKeyOf(iv.start) === k)) {
-      merge(await octo.measurementsBetween(number, mpan, m0 + NOON, midnight(addDays(k, 1)) + NOON, direction));
+  let asked = 0;
+  const ask = async (windows) => {
+    for (const [a, b] of [...windows.values()].sort((x, y) => y[0] - x[0])) {      // newest first
+      if (!lacking().length) return;
+      asked++;
+      merge(await octo.measurementsBetween(number, mpan, a, b, direction));
     }
-  }
+  };
+  const windowsOf = (f) => { const m = new Map(); for (const iv of lacking()) { const w = f(iv); m.set(w.join(), w); } return m; };
+  const total = lacking().length;
+  if (!total) return intervals;
+  const asked0 = asked;
+  await ask(windowsOf((iv) => { const k = dayKeyOf(iv.start); return [midnight(k), midnight(addDays(k, 1))]; }));
+  const afterDay = lacking().length;
+  await ask(windowsOf((iv) => {
+    const k = dayKeyOf(iv.start), first = `${k.slice(0, 8)}01`;
+    const { y, m } = parseKey(first);
+    return [midnight(first), midnight(addMonths(y, m, 1, 1))];
+  }));
+  await ask(windowsOf((iv) => {
+    const k = dayKeyOf(iv.start), n = noon(k);
+    return iv.start < n ? [noon(addDays(k, -1)), n] : [n, noon(addDays(k, 1))];
+  }));
+  // EMT's log line: counts only, nothing about the account
+  const left = lacking().length;
+  console.info(`recover costs ${direction}: ${total - left}/${total} half-hours recovered `
+    + `(day ${total - afterDay}, then month and noon ${afterDay - left}), ${asked - asked0} requests, ${left} still without a cost`);
   return intervals;
 }

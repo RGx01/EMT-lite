@@ -4,9 +4,11 @@
 import { recoverCosts } from './octopus.js';
 import { byDay } from './measurements.js';
 import { anchorFromBillingDay } from './periods.js';
-import { addMonths, addDays, parseKey, todayKey, dayKeyOf, midnight, HALF_HOUR, slotOf } from './time.js';
+import { addMonths, addDays, parseKey, todayKey, dayKeyOf, midnight, HALF_HOUR, slotOf, dayWindows } from './time.js';
 
 export const DEFAULT_MONTHS = 13;
+// At most 482 half-hours (a clocks-back day has 50): one 500-row page of measurements.
+export const WINDOW_DAYS = 10;
 
 const dateKey = (iso) => (iso ? dayKeyOf(Date.parse(iso)) : null);
 
@@ -120,13 +122,17 @@ export class AccountData {
     return out.size ? out : null;
   }
 
-  // Import and export are asked for at the same time: Octopus takes seconds over each page of a
-  // month (about 5 s for an IOG-SMB import page), and the two do not depend on each other.
+  // A month is asked as windows of at most 10 local days, each within one 500-row page, import
+  // and export together. Small asks are what EMT found reliable: its 60-day asks timed out where
+  // 30-day ones landed (EMT CHANGELOG, 6 Nov 2026). The Octopus client keeps four in flight.
   async loadMonth(month) {
     const { number } = this.info;
     const imp = this.info.import;
+    const windows = dayWindows(month.start, month.end, WINDOW_DAYS);
+    const fetchAll = async (mpan, dir) => (await Promise.all(
+      windows.map((w) => this.octo.measurements(number, mpan, w.start, w.end, dir)))).flat();
     const importing = imp ? (async () => {
-      const got = await this.octo.measurements(number, imp.mpan, month.start, month.end, 'CONSUMPTION');
+      const got = await fetchAll(imp.mpan, 'CONSUMPTION');
       await recoverCosts(this.octo, number, imp.mpan, got, 'CONSUMPTION', dayKeyOf, Date.now(), imp.from);
       const ag = agreementAt(imp.agreements, midnight(month.start) + 15 * 86400000);
       const t = ag?.tariff;
@@ -134,9 +140,7 @@ export class AccountData {
         ? await this.octo.publishedRates(t.productCode, t.tariffCode, month.start, month.end) : [];
       return { got, rates };
     })() : Promise.resolve(null);
-    const exporting = this.info.export
-      ? this.octo.measurements(number, this.info.export.mpan, month.start, month.end, 'GENERATION')
-      : Promise.resolve(null);
+    const exporting = this.info.export ? fetchAll(this.info.export.mpan, 'GENERATION') : Promise.resolve(null);
     const [i, e] = await Promise.all([importing, exporting]);
     // nothing is added until the whole month is in, so a month is never half shown
     if (i) {
