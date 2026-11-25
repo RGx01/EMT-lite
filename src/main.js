@@ -1,7 +1,7 @@
 import { Octopus } from './octopus.js';
 import { AccountData, describeAccount, monthsToLoad, DEFAULT_MONTHS } from './data.js';
 import { anchorFromBillingDay } from './periods.js';
-import { todayKey, parseKey } from './time.js';
+import { todayKey } from './time.js';
 import { DemoOctopus, demoAccountInfo } from './demo.js';
 import { BillsView } from './bills.js';
 import { renderHeatmap } from './heatmap.js';
@@ -14,7 +14,7 @@ const remember = (v) => localStorage.setItem(STORE, JSON.stringify(v));
 const forget = () => localStorage.removeItem(STORE);
 
 const $ = (id) => document.getElementById(id);
-let octo = null, data = null, bills = null, tab = 'bills', hmDir = 'imp', keep = false, monthsWanted = DEFAULT_MONTHS;
+let octo = null, data = null, bills = null, tab = 'bills', keep = false, monthsWanted = DEFAULT_MONTHS;
 
 function showError(msg) {
   const e = $('error');
@@ -41,13 +41,10 @@ function redraw() {
     if (!data) return;
     if (tab === 'bills') bills.render();
     else {
-      const months = monthsToLoad(data.loaded.length).reverse();
-      const exp = hmDir === 'exp' && data.info.export;
       renderHeatmap($('heatmap'), {
-        months,
-        days: exp ? data.expDays : data.impDays,
-        cover: exp ? data.expCover : data.impCover,
-        label: exp ? 'Export' : 'Import',
+        months: monthsToLoad(data.loaded.length).reverse(),
+        imp: data.impDays, impCover: data.impCover,
+        exp: data.info.export ? data.expDays : null, expCover: data.info.export ? data.expCover : null,
       });
     }
   });
@@ -102,7 +99,7 @@ function persist(extra = {}) {
 
 async function start(info) {
   const user = remembered()?.billingDay;
-  if (user && (!info.billing || info.billing.source !== 'octopus')) {
+  if (user) {
     info.billing = { anchor: anchorFromBillingDay(user, todayKey()), months: 1, source: 'user' };
   }
   data = new AccountData(octo, info);
@@ -112,7 +109,6 @@ async function start(info) {
       if (keep) remember({ ...(remembered() || {}), billingDay: day });
     },
   });
-  $('hm-dir').hidden = !info.export;
   await loadMonths(monthsToLoad(monthsWanted));
 }
 
@@ -148,9 +144,12 @@ async function signInAndLoad(signIn) {
     const acc = await octo.accountInfo(number);
     const info = describeAccount(number, acc);
     if (!info.import) throw new Error('No electricity import meter on this account.');
-    if (!info.billing) {
-      const from = await octo.lastBillStart(number).catch(() => null);
-      if (from) info.billing = { anchor: anchorFromBillingDay(parseKey(from).d, todayKey()), months: 1, source: 'bills' };
+    const recent = await octo.recentBills(number).catch(() => []);
+    info.evidence = { options: acc.billingOptions || null, bills: recent };
+    // An account's statements need not close on a fixed day: when there are statements, they are
+    // the bill periods (design §5.2).
+    if (recent.some((b) => String(b.billType || '').toUpperCase() === 'STATEMENT')) {
+      info.billing = { statements: recent, options: acc.billingOptions || null, source: 'statements' };
     }
     $('who').textContent = number;
     await start(info);
@@ -182,13 +181,6 @@ $('more').addEventListener('click', () => {
   loadMonths(monthsToLoad(monthsWanted));
 });
 for (const b of document.querySelectorAll('#tabs .tab')) b.addEventListener('click', () => setTab(b.dataset.tab));
-for (const b of document.querySelectorAll('#hm-dir .mode')) {
-  b.addEventListener('click', () => {
-    hmDir = b.dataset.dir;
-    for (const x of document.querySelectorAll('#hm-dir .mode')) x.classList.toggle('active', x === b);
-    redraw();
-  });
-}
 window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', redraw);
 
 // A remembered device signs in with its refresh token.

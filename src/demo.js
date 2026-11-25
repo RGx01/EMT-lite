@@ -56,18 +56,24 @@ function dayIntervals(k, dir, lastMs) {
     if (dir === 'GENERATION') {
       const sun = Math.max(0, Math.sin(((slot - 12) / 28) * Math.PI)) * summer;
       const kwh = sun > 0.05 ? +(sun * (0.6 + r() * 0.9)).toFixed(3) : 0;
-      out.push({ start: t, kwh, costExc: kwh * EXPORT_P, standingExc: null, offPeak: false });
+      out.push({ start: t, kwh, costExc: kwh * EXPORT_P, standingExc: null, offPeak: false, split: null });
       continue;
     }
     const offPeak = slot >= 47 || slot < 11;
-    let kwh = 0.12 + r() * 0.15;
-    if (slot >= 14 && slot <= 17) kwh += r() * 0.5;
-    if (slot >= 34 && slot <= 40) kwh += 0.4 + r() * 0.8 * (1.3 - summer);
-    if (evNight && offPeak && slot < 9) kwh += 3.3 + r() * 0.3;
-    kwh = +kwh.toFixed(3);
+    let home = 0.12 + r() * 0.15;
+    if (slot >= 14 && slot <= 17) home += r() * 0.5;
+    if (slot >= 34 && slot <= 40) home += 0.4 + r() * 0.8 * (1.3 - summer);
+    home = +home.toFixed(3);
+    const ev = evNight && offPeak && slot < 9 ? +(3.3 + r() * 0.3).toFixed(3) : 0;
+    const kwh = +(home + ev).toFixed(3);
+    const rate = offPeak ? OFF_PEAK_EXC : PEAK_EXC;
+    const band = offPeak ? 'off' : 'peak', other = offPeak ? 'peak' : 'off';
+    // IOG-SMB: four buckets every half-hour, zero where unused
+    const split = { [`ev:${band}`]: { kwh: ev, cost: ev * rate }, [`home:${band}`]: { kwh: home, cost: home * rate },
+      [`ev:${other}`]: { kwh: 0, cost: 0 }, [`home:${other}`]: { kwh: 0, cost: 0 } };
     const late = Date.now() - t < 3 * 86400000 && r() < 0.5;            // recent: kWh in, cost not yet
-    out.push({ start: t, kwh, costExc: late ? null : kwh * (offPeak ? OFF_PEAK_EXC : PEAK_EXC),
-      standingExc: STANDING_EXC_DAY / 48, offPeak });
+    out.push({ start: t, kwh, costExc: late ? null : kwh * rate, standingExc: STANDING_EXC_DAY / 48, offPeak,
+      split: late ? null : split });
   }
   return out;
 }

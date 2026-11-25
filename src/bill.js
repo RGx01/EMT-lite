@@ -38,6 +38,7 @@ export function summarise(period, imp, impCover, exp = null, expCover = null) {
     offPeak: emptyBand(), peak: emptyBand(), unbanded: emptyBand(),
     uncostedKwh: 0, uncostedSlots: 0, missing: 0, pending: 0,
     exportKwh: 0, exportCredit: 0, exportMissing: 0, net: 0, avgRate: null,
+    split: null, unsplitSlots: 0,   // Octopus's House/EV split (IOG-SMB), VAT added; costed half-hours without one
   };
   let costedKwh = 0;
   const today = dayKeyOf(impCover.now ?? Date.now());
@@ -64,6 +65,16 @@ export function summarise(period, imp, impCover, exp = null, expCover = null) {
       const band = iv.offPeak === true ? s.offPeak : iv.offPeak === false ? s.peak : s.unbanded;
       band.kwh += iv.kwh;
       band.cost += cost;
+      if (iv.split) {
+        s.split = s.split || {};
+        for (const [key, e] of Object.entries(iv.split)) {
+          const t = s.split[key] || (s.split[key] = { kwh: 0, cost: 0 });
+          t.kwh += e.kwh;
+          t.cost += e.cost * v;
+        }
+      } else {
+        s.unsplitSlots++;
+      }
     }
     if (exp) {
       const eday = exp.get(k);
@@ -77,6 +88,7 @@ export function summarise(period, imp, impCover, exp = null, expCover = null) {
       }
     }
   }
+  if (!s.split) s.unsplitSlots = 0;        // not a split tariff: nothing is waiting for one
   s.total = s.energy + s.standing;
   s.net = s.total - s.exportCredit;
   s.avgRate = costedKwh > 0 ? s.energy / costedKwh : null;

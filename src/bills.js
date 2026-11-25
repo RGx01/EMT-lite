@@ -5,7 +5,7 @@ import {
   Chart, BarController, BarElement, LineController, LineElement, PointElement,
   LinearScale, CategoryScale, Tooltip, Legend,
 } from 'chart.js';
-import { billPeriods, calendarPeriods, previousOf, lastYearOf, periodLabel } from './periods.js';
+import { billPeriods, calendarPeriods, previousOf, lastYearOf, periodLabel, periodsFromStatements } from './periods.js';
 import { summarise, pounds } from './bill.js';
 import { rateLine } from './rates.js';
 import { daysBetween, slotsOfDay, todayKey, parseKey, addDays } from './time.js';
@@ -39,7 +39,12 @@ export class BillsView {
     const first = this.data.firstDay(), last = todayKey();
     if (this.mode === 'bill') {
       const b = this.data.info.billing;
-      return b ? billPeriods(b.anchor, b.months, first, last) : [];
+      if (!b) return [];
+      if (b.statements) {
+        const ps = periodsFromStatements(b.statements, b.options, first, last);
+        if (ps.length) return ps;
+      }
+      return b.anchor ? billPeriods(b.anchor, b.months, first, last) : [];
     }
     return calendarPeriods(this.mode, first, last);
   }
@@ -79,7 +84,8 @@ export class BillsView {
     next.addEventListener('click', () => { this.sel = list[idx + 1].start; this.render(); });
     const select = el('select');
     list.forEach((q, i) => {
-      const o = el('option', null, periodLabel(q, this.mode));
+      const tag = this.mode === 'bill' && q.current ? ' (current)' : this.mode === 'bill' && q.estimated ? ' (estimated)' : '';
+      const o = el('option', null, periodLabel(q, this.mode) + tag);
       o.value = q.start;
       if (i === idx) o.selected = true;
       select.append(o);
@@ -88,7 +94,7 @@ export class BillsView {
     nav.append(prev, select, next);
     if (this.mode === 'bill') {
       const src = this.data.info.billing.source;
-      const why = src === 'octopus' ? 'billing day from Octopus' : src === 'bills' ? 'billing day from your bills'
+      const why = src === 'statements' ? 'periods from your Octopus statements' : src === 'octopus' ? 'billing day from Octopus'
         : src === 'demo' ? 'demo billing day' : 'billing day you entered';
       const change = el('button', 'link', `${why} · change`);
       change.type = 'button';
@@ -96,12 +102,39 @@ export class BillsView {
       nav.append(change);
     }
     this.root.append(nav);
+    if (this.mode === 'bill' && this.data.info.evidence) this.root.append(this.evidence());
 
     const d = this.data;
     const sum = (q) => q && summarise(q, d.impDays, d.impCover, d.expDays, d.expCover);
     const s = sum(p), sp = sum(previousOf(list, p)), sy = sum(lastYearOf(list, p));
     this.root.append(this.card(p, s, sp, sy));
     this.root.append(this.days(p));
+  }
+
+  /** What Octopus said about billing, so a wrong period can be traced to its source. */
+  evidence() {
+    const { options: o, bills: bs } = this.data.info.evidence;
+    const box = el('details', 'evidence');
+    box.append(el('summary', null, 'What Octopus says about your billing'));
+    const lines = el('ul');
+    if (o) {
+      lines.append(el('li', null, `Billing options: start day ${o.periodStartDay ?? '—'}, ${String(o.periodLength ?? '—').toLowerCase()}`
+        + ` × ${o.periodLengthMultiplier ?? 1}${o.isFixed ? ', fixed' : ''}`));
+      lines.append(el('li', null, `Current period: ${o.currentBillingPeriodStartDate ?? '—'} to ${o.currentBillingPeriodEndDate ?? '—'}`
+        + ` · next bill ${o.nextBillingDate ?? '—'}`));
+    } else {
+      lines.append(el('li', null, 'No billing options.'));
+    }
+    if (bs.length) {
+      for (const b of bs.slice(0, 6)) {
+        lines.append(el('li', null, `${String(b.billType || 'Bill').toLowerCase()}: ${b.fromDate} to ${b.toDate ?? '—'}`
+          + `${b.issuedDate ? `, issued ${b.issuedDate}` : ''}`));
+      }
+    } else {
+      lines.append(el('li', null, 'No bills returned.'));
+    }
+    box.append(lines);
+    return box;
   }
 
   billingDayPrompt() {
@@ -124,7 +157,8 @@ export class BillsView {
 
   card(p, s, sp, sy) {
     const card = el('section', 'bill-card');
-    card.append(el('h2', null, periodLabel(p, this.mode)));
+    card.append(el('h2', null, periodLabel(p, this.mode)
+      + (this.mode === 'bill' && p.estimated && !p.current ? ' · estimated period, no statement' : '')));
     const big = el('div', 'bill-total');
     big.append(el('span', 'amount', pounds(s.net)), el('span', 'muted', s.exportKwh ? ' after export' : ' total'));
     card.append(big);
@@ -143,8 +177,8 @@ export class BillsView {
     card.append(cmp);
 
     const t = el('table', 'bill-rows');
-    const row = (a, b, c = '') => {
-      const tr = el('tr');
+    const row = (a, b, c = '', cls = null) => {
+      const tr = el('tr', cls);
       tr.append(el('th', null, a), el('td', null, b), el('td', 'num', c));
       t.append(tr);
     };
@@ -153,14 +187,31 @@ export class BillsView {
     if (s.offPeak.kwh) row('Off-peak', kwh(s.offPeak.kwh) + rate(s.offPeak), pounds(s.offPeak.cost));
     if (s.peak.kwh) row('Peak', kwh(s.peak.kwh) + rate(s.peak), pounds(s.peak.cost));
     if (s.unbanded.kwh) row('Energy', kwh(s.unbanded.kwh) + rate(s.unbanded), pounds(s.unbanded.cost));
+    if (s.split) {
+      const head = el('tr', 'sub-head');
+      const th = el('th', null, 'Octopus’s House / EV split');
+      th.colSpan = 3;
+      head.append(th);
+      t.append(head);
+      const NAMES = { ev: 'EV', home: 'House' }, BANDS = { off: 'off-peak', peak: 'peak', other: '' };
+      for (const band of ['off', 'peak', 'other']) {
+        for (const side of ['ev', 'home']) {
+          const e = s.split[`${side}:${band}`];
+          if (!e || (e.kwh < 0.0005 && Math.abs(e.cost) < 0.005)) continue;
+          row(`${NAMES[side]} ${BANDS[band]}`.trim(), kwh(e.kwh) + rate(e), pounds(e.cost));
+        }
+      }
+    }
     row('Standing charge', `${s.days} day${s.days === 1 ? '' : 's'}${s.finished ? '' : ' so far'}`, pounds(s.standing));
-    row('Import total', kwh(s.kwh), pounds(s.total));
+    row('Import total', kwh(s.kwh), pounds(s.total), 'total');
     if (s.exportKwh) row('Export', kwh(s.exportKwh), `−${pounds(s.exportCredit)}`);
     card.append(t);
 
     const notes = el('ul', 'bill-notes');
     if (s.missing) notes.append(el('li', 'warn', `${s.missing} half-hour${s.missing === 1 ? '' : 's'} with no reading from Octopus: this bill will look short. See the heatmap.`));
     if (s.uncostedSlots) notes.append(el('li', 'warn', `${s.uncostedKwh.toFixed(2)} kWh in ${s.uncostedSlots} half-hour${s.uncostedSlots === 1 ? '' : 's'} not costed by Octopus yet.`));
+    if (s.unsplitSlots) notes.append(el('li', 'warn', `${s.unsplitSlots} costed half-hour${s.unsplitSlots === 1 ? '' : 's'} without Octopus’s House/EV split yet: the split rows add up to less than the energy.`));
+    if (s.split) notes.append(el('li', 'muted', 'Octopus can revise its House/EV split for some days after it first appears.'));
     if (s.pending) notes.append(el('li', 'muted', `${s.pending} half-hour${s.pending === 1 ? '' : 's'} not in from Octopus yet.`));
     notes.append(el('li', 'muted', 'VAT added to Octopus’s ex-VAT costs by date (domestic rate).'));
     card.append(notes);

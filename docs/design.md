@@ -17,11 +17,15 @@ A web page for an Octopus customer **without Home Assistant**. They paste their 
    stepped line. The periods are cut the way EMT's Billing tab cuts them (`web/templates/billing_module.html`):
    Bill / Month / Quarter / Year, with *vs previous* and *vs last year*.
 2. **A data heatmap.** EMT's kWh heatmap (`web/templates/heatmap_module.html`): one row per day, one
-   square per local half-hour, a month per chart, coloured by the half-hour's kWh with EMT's colour
-   stops, and the daily total as bars beside it. A half-hour that Octopus has **no reading for** is
-   drawn **black and white hatched**. An account with an export meter gets an Import / Export
-   toggle. Each side is its own grid with its own gaps, since the two meters' readings arrive
-   separately.
+   square per local half-hour, a month per chart, coloured by **net** kWh (import − export) with
+   EMT's colour stops, and the daily net as bars beside it: one grid, as EMT's kWh heatmap.
+   A half-hour Octopus has **no reading for** is hatched over its cell: **green** where the export
+   reading is missing (the colour is the import alone), **red** where the import is missing (the
+   colour is the export alone), **black and white** where neither is there, or the import is
+   missing on an account without export. Decided 25 Nov 2026, replacing an Import / Export toggle.
+3. **The House / EV split** on an IOG-SMB tariff: Octopus's own split, from the kWh and cost of
+   each of its buckets (EMT's `bucket_side`), as rows on the bill card. A half-hour with a bucket
+   label it does not recognise is left unsplit, not guessed, and the card says how many.
 
 What it is not: no live power, no devices or EV split, no Data Management, no corrections, no bill
 PDFs, no carbon. It shows what Octopus holds, and the gaps in it.
@@ -113,10 +117,17 @@ introspection on 25 Nov 2026.
 `periodLengthMultiplier`, `isFixed`, `currentBillingPeriodStartDate` and
 `currentBillingPeriodEndDate`.
 
-1. If `periodStartDay` is set, use it. *Not yet tried with a real key: the first job when
-   built.*
-2. If not, take the start day of `account.bills`.
-3. If neither works, ask the user, store the answer with the cache (§6), and let them change it.
+**Statements first (25 Nov 2026).** The first real account tried had no `periodStartDay`, and its
+statements closed on different days each month. A fixed day cannot cut
+those periods. So when `account.bills` returns statements, **each statement's own dates are its
+bill period**; after the last comes the current one (`currentBillingPeriodStartDate` to its end
+date, or a month on); history older than the oldest statement is estimated monthly back from it.
+Every period not taken from a statement is labelled estimated.
+
+Without statements:
+
+1. If `periodStartDay` or `currentBillingPeriodStartDate` is set, step a month (or a quarter) from it.
+2. If neither, ask the user, and let them change it. A day the user enters overrides everything.
 
 **Monthly and quarterly use one rule.** Bill periods are cut backwards (and forwards) from
 `currentBillingPeriodStartDate` in steps of `periodLength` × `periodLengthMultiplier` months. With
@@ -246,8 +257,9 @@ Added beyond the design:
 
 Not yet:
 
-- **Tried with a real key.** The sign-in, `billingOptions`, `refreshExpiresIn`, export detection by
-  `direction` and the measurement query are written to the schema but unrun against an account.
+- ~~Tried with a real key.~~ Done 25 Nov 2026: sign-in, Remember me, account discovery, statements,
+  export detection, the House/EV split and the measurement query all work on an IOG-SMB account
+  with export. Its export meter sends zero readings at night, so a night is not hatched green.
 - **The IndexedDB cache** (§6). Everything is in memory; a remembered device re-fetches.
 - **Business VAT.** The calendar is domestic (§5.3).
 - **Playwright CSP check** (§7). Checked by hand this time.

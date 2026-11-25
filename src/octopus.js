@@ -139,7 +139,8 @@ export class Octopus {
     const tariff = (t) => `... on ${t} { productCode tariffCode isExport displayName }`;
     const d = await this.gql(
       `query acc($n: String!) { account(accountNumber: $n) {
-        billingOptions { periodStartDay periodLength periodLengthMultiplier currentBillingPeriodStartDate }
+        billingOptions { periodStartDay periodLength periodLengthMultiplier isFixed
+          currentBillingPeriodStartDate currentBillingPeriodEndDate nextBillingDate }
         properties { id electricityMeterPoints { mpan direction
           agreements(includeInactive: true) { validFrom validTo tariff {
             ${['StandardTariff', 'DayNightTariff', 'ThreeRateTariff', 'FourRateEvTariff', 'HalfHourlyTariff', 'PrepayTariff'].map(tariff).join(' ')}
@@ -149,13 +150,14 @@ export class Octopus {
     return d.account || null;
   }
 
-  async lastBillStart(number) {
+  /** The account's recent bills, newest first: [{ fromDate, toDate, issuedDate, billType }]. */
+  async recentBills(number) {
     const d = await this.gql(
-      'query b($n: String!) { account(accountNumber: $n) { bills(first: 3) { edges { node { fromDate toDate } } } } }',
+      'query b($n: String!) { account(accountNumber: $n) { bills(first: 12) { edges { node { billType fromDate toDate issuedDate } } } } }',
       { n: number },
     );
-    const dates = (d.account?.bills?.edges || []).map((e) => e.node?.fromDate).filter(Boolean).sort();
-    return dates.at(-1) || null;
+    return (d.account?.bills?.edges || []).map((e) => e.node).filter((b) => b?.fromDate)
+      .sort((x, y) => String(y.fromDate).localeCompare(String(x.fromDate)));
   }
 
   /** Half-hours for [fromKey, toKey) local days, with costs. `direction`: CONSUMPTION | GENERATION. */
@@ -213,8 +215,11 @@ export class Octopus {
 
 /** Fill costs Octopus left out of a month's answer: ask those local days, then noon to noon
  *  (EMT's recover_measurement_costs). Mutates and returns `intervals`. */
-export async function recoverCosts(octo, number, mpan, intervals, direction, dayKeyOf) {
-  const lacking = () => intervals.filter((iv) => iv.costExc == null && iv.kwh > 0);
+export async function recoverCosts(octo, number, mpan, intervals, direction, dayKeyOf, now = Date.now()) {
+  // The last three days are usually not priced yet: asking again would only spend the account's
+  // rate limit. Recovery is for the older holes a month's answer leaves.
+  const recent = dayKeyOf(now - 3 * 86400000);
+  const lacking = () => intervals.filter((iv) => iv.costExc == null && iv.kwh > 0 && dayKeyOf(iv.start) < recent);
   const merge = (got) => {
     const by = new Map(got.filter((g) => g.costExc != null).map((g) => [g.start, g]));
     for (const iv of intervals) {

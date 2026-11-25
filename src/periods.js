@@ -74,3 +74,54 @@ export function periodLabel(p, kind) {
   const f = (x) => `${x.d} ${MON[x.m - 1]} ${x.y}`;
   return `${f(s)} – ${f(e)}`;
 }
+
+/**
+ * Bill periods from the account's own statements (design §5.2). An account's statements need not
+ * close on a fixed day of the month, so each statement's dates ARE its bill period
+ * ([fromDate, toDate + 1 day)). After the last statement comes the open current period, from
+ * Octopus's currentBillingPeriodStartDate to its end date or, with none, a month on. History older
+ * than the oldest statement is estimated a month at a time back from it. Every period not taken
+ * from a statement is marked `estimated`.
+ *
+ * `statements`: Octopus bills ({ billType, fromDate, toDate }); `options`: billingOptions.
+ * Returns [] when there are no statements, so the caller falls back to the fixed-day rule.
+ */
+export function periodsFromStatements(statements, options, firstKey, lastKey) {
+  const seen = new Set();
+  const real = [];
+  for (const b of statements || []) {
+    if (String(b.billType || 'STATEMENT').toUpperCase() !== 'STATEMENT' || !b.fromDate || !b.toDate) continue;
+    if (seen.has(b.fromDate)) continue;
+    seen.add(b.fromDate);
+    real.push({ start: b.fromDate, end: addDays(b.toDate, 1) });
+  }
+  if (!real.length) return [];
+  real.sort((a, b) => a.start.localeCompare(b.start));
+
+  const out = [];
+  const oldest = parseKey(real[0].start);
+  for (let i = -1; ; i--) {
+    const start = addMonths(oldest.y, oldest.m, oldest.d, i);
+    out.unshift({ start, end: addMonths(oldest.y, oldest.m, oldest.d, i + 1), estimated: true });
+    if (start <= firstKey) break;
+  }
+  if (out.length && out[0].end <= firstKey) out.shift();
+  out.push(...real);
+
+  let tail = real.at(-1).end;
+  const curStart = options?.currentBillingPeriodStartDate;
+  if (curStart && curStart >= tail) {
+    const s = parseKey(curStart);
+    const end = options.currentBillingPeriodEndDate ? addDays(options.currentBillingPeriodEndDate, 1)
+      : addMonths(s.y, s.m, s.d, 1);
+    out.push({ start: curStart, end, estimated: true, current: true });
+    tail = end;
+  }
+  while (tail <= lastKey) {
+    const s = parseKey(tail);
+    const end = addMonths(s.y, s.m, s.d, 1);
+    out.push({ start: tail, end, estimated: true });
+    tail = end;
+  }
+  return out;
+}

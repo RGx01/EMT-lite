@@ -198,3 +198,140 @@ describe('future half-hours', () => {
     expect(s.missing + s.pending).toBe(11 * 48 + 21);
   });
 });
+
+// Statements that close on different days each month (fictional dates, the shape a real account showed).
+import { periodsFromStatements } from '../src/periods.js';
+
+describe('bill periods from statements', () => {
+  const statements = [
+    { billType: 'STATEMENT', fromDate: '2025-10-07', toDate: '2025-11-06' },
+    { billType: 'STATEMENT', fromDate: '2025-09-08', toDate: '2025-10-06' },
+    { billType: 'STATEMENT', fromDate: '2025-08-04', toDate: '2025-09-07' },
+    { billType: 'STATEMENT', fromDate: '2025-07-04', toDate: '2025-08-03' },
+  ];
+  const current = { currentBillingPeriodStartDate: '2025-11-07', currentBillingPeriodEndDate: null };
+
+  it('takes each statement’s own dates, so a period ends where its statement ends', () => {
+    const ps = periodsFromStatements(statements, current, '2025-07-04', '2025-11-25');
+    expect(ps.filter((p) => !p.estimated).map((p) => [p.start, p.end])).toEqual([
+      ['2025-07-04', '2025-08-04'],
+      ['2025-08-04', '2025-09-08'],
+      ['2025-09-08', '2025-10-07'],
+      ['2025-10-07', '2025-11-07'],
+    ]);
+  });
+  it('adds the open current period, a month long when Octopus gives no end', () => {
+    const ps = periodsFromStatements(statements, current, '2025-07-04', '2025-11-25');
+    expect(ps.at(-1)).toEqual({ start: '2025-11-07', end: '2025-12-07', estimated: true, current: true });
+  });
+  it('estimates months back from the oldest statement for history before it', () => {
+    const ps = periodsFromStatements(statements, current, '2025-05-20', '2025-11-25');
+    expect(ps.slice(0, 2)).toEqual([
+      { start: '2025-05-04', end: '2025-06-04', estimated: true },
+      { start: '2025-06-04', end: '2025-07-04', estimated: true },
+    ]);
+  });
+  it('ignores bills that are not statements, and repeats', () => {
+    const ps = periodsFromStatements(
+      [...statements, statements[0], { billType: 'INVOICE', fromDate: '2025-09-01', toDate: '2025-09-30' }],
+      current, '2025-07-04', '2025-11-25');
+    expect(ps.filter((p) => !p.estimated)).toHaveLength(4);
+  });
+  it('has no statements: returns nothing, so the fixed-day rule is used', () => {
+    expect(periodsFromStatements([], current, '2025-07-04', '2025-11-25')).toEqual([]);
+  });
+});
+
+import { bucketSide } from '../src/measurements.js';
+
+describe('IOG-SMB House/EV split', () => {
+  const smb = (start, ev, home, evOff = true) => node(start, ev + home, [
+    energy('HOME_OFF_PEAK', evOff ? home * 7 : 0, evOff ? home : 0),
+    energy('HOME_STANDARD_RATE', evOff ? 0 : home * 24.5, evOff ? 0 : home),
+    energy('EV_OFF_PEAK', evOff ? ev * 7 : 0, evOff ? ev : 0),
+    energy('EV_STANDARD_RATE', evOff ? 0 : ev * 24.5, evOff ? 0 : ev),
+    standing(1),
+  ]);
+  it('classifies both label vocabularies, EV before the band words', () => {
+    expect(bucketSide('EV_OFF_PEAK')).toBe('ev');
+    expect(bucketSide('EV STANDARD RATE')).toBe('ev');
+    expect(bucketSide('EV_BOOST')).toBe('ev');
+    expect(bucketSide('HOME_STANDARD_RATE')).toBe('home');
+    expect(bucketSide('HP_DEVICE')).toBe('home');
+    expect(bucketSide('SOMETHING_NEW')).toBe(null);
+  });
+  it('keeps each bucket’s kWh and cost', () => {
+    const iv = parseNode(smb('2026-11-02T01:00:00Z', 3.5, 0.2));
+    expect(iv.split['ev:off'].kwh).toBeCloseTo(3.5);
+    expect(iv.split['ev:off'].cost).toBeCloseTo(24.5);
+    expect(iv.split['home:off'].kwh).toBeCloseTo(0.2);
+    expect(iv.split['ev:peak'].kwh).toBe(0);
+  });
+  it('refuses the split when a label is unrecognised, rather than guess a side', () => {
+    const n = smb('2026-11-02T01:00:00Z', 3.5, 0.2);
+    n.metaData.statistics.push(energy('SOMETHING_NEW', 0, 0));
+    expect(parseNode(n).split).toBe(null);
+  });
+  it('a tariff without EV buckets has no split', () => {
+    expect(parseNode(node('2026-11-02T01:00:00Z', 1, [energy('CONSUMPTION', 24, 1)])).split).toBe(null);
+  });
+  it('the bill sums House and EV, with VAT by date', () => {
+    const ivs = [
+      parseNode(smb('2026-09-29T23:00:00Z', 3.5, 0.2)),           // 30 Sep 00:00 BST, 5%
+      parseNode(smb('2026-09-30T23:00:00Z', 3.0, 0.5)),           // 1 Oct 00:00 BST, 0%
+      parseNode(smb('2026-10-01T09:00:00Z', 0, 0.4, false)),      // 1 Oct 10:00, peak
+    ];
+    const s = summarise({ start: '2026-09-30', end: '2026-10-02' }, byDay(ivs),
+      { from: '2026-01-01', last: Date.parse('2026-10-01T09:00:00Z') });
+    // EV off-peak: 3.5 kWh × 7p × 1.05 + 3.0 kWh × 7p = 25.725 + 21 = 46.725p over 6.5 kWh
+    expect(s.split['ev:off'].kwh).toBeCloseTo(6.5);
+    expect(s.split['ev:off'].cost).toBeCloseTo(46.725);
+    // Home: off-peak 0.2 × 7 × 1.05 + 0.5 × 7 = 4.97p; peak 0.4 × 24.5 = 9.8p
+    expect(s.split['home:off'].cost).toBeCloseTo(4.97);
+    expect(s.split['home:peak'].cost).toBeCloseTo(9.8);
+    // the split adds up to the energy total
+    const sum = Object.values(s.split).reduce((a, e) => a + e.cost, 0);
+    expect(sum).toBeCloseTo(s.energy);
+    expect(s.unsplitSlots).toBe(0);
+  });
+});
+
+import { cellOf } from '../src/heatmap.js';
+
+describe('net heatmap cells', () => {
+  const k = '2026-11-10', t = (s) => midnight(k) + s * HALF_HOUR;
+  const cover = { from: '2026-01-01', last: midnight('2026-11-11'), now: midnight('2026-11-12') };
+  const iv = (s, kwh) => ({ start: t(s), kwh, costExc: 1, standingExc: 1, offPeak: null, split: null });
+  // slot 0 both, 1 export missing, 2 import missing, 3 both missing
+  const imp = byDay([iv(0, 0.5), iv(1, 0.4)]);
+  const exp = byDay([iv(0, 0.2), iv(2, 1.5)]);
+
+  it('both present: import − export, no hatch', () => {
+    const c = cellOf(imp, cover, exp, cover, k, 0);
+    expect(c.value).toBeCloseTo(0.3);
+    expect(c.hatch).toBe(null);
+  });
+  it('export missing: the import alone, hatched green', () => {
+    const c = cellOf(imp, cover, exp, cover, k, 1);
+    expect(c.value).toBeCloseTo(0.4);
+    expect(c.hatch).toBe('green');
+  });
+  it('import missing: the export alone (negative), hatched red', () => {
+    const c = cellOf(imp, cover, exp, cover, k, 2);
+    expect(c.value).toBeCloseTo(-1.5);
+    expect(c.hatch).toBe('red');
+  });
+  it('both missing: black and white, no colour', () => {
+    const c = cellOf(imp, cover, exp, cover, k, 3);
+    expect(c.value).toBe(null);
+    expect(c.hatch).toBe('bw');
+  });
+  it('no export meter: a missing import is black and white', () => {
+    expect(cellOf(imp, cover, null, null, k, 3).hatch).toBe('bw');
+    expect(cellOf(imp, cover, null, null, k, 1).hatch).toBe(null);
+  });
+  it('an export meter supplied only later is not missing before it started', () => {
+    const late = { ...cover, from: '2026-11-20' };
+    expect(cellOf(imp, cover, exp, late, k, 1).hatch).toBe(null);
+  });
+});

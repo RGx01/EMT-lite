@@ -1,13 +1,20 @@
-// The data heatmap (design §1): a canvas per local month, a row per day, a square per local
-// half-hour, coloured by kWh with EMT's colour stops (heatmap_module.html kwhStops / paint).
-// Black with grey diagonals: Octopus has no reading for the half-hour. Blank: not in yet, before
-// the supply started, or (clocks-forward day) a half-hour that does not exist.
+// The data heatmap (design §1): EMT's net kWh heatmap. A canvas per local month, a row per day, a
+// square per local half-hour, coloured by import − export with EMT's colour stops
+// (heatmap_module.html kwhStops / paint): above zero white → orange → red, below zero
+// white → green → blue.
+//
+// Gaps are hatched over the cell (cellOf):
+//   black and white      no import reading (and no export reading to show instead)
+//   green over colour    the export reading is missing; the colour is the import alone
+//   red over colour      the import reading is missing; the colour is the export alone
+// Blank: not in yet, before the supply started, or a half-hour the clocks skipped.
 
 import { daysBetween, slotsOfDay, parseKey } from './time.js';
 import { slotState } from './bill.js';
 
-const CELL = 16, GAP = 1, LEFT = 34, TOP = 40, TOTAL_W = 110, PAD = 10;
+const CELL = 16, GAP = 1, LEFT = 34, TOP = 40, TOTAL_W = 120, PAD = 10;
 const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+const HATCH = { bw: ['#000000', '#ffffff'], green: [null, '#00c853'], red: [null, '#ff1744'] };
 
 const dark = () => window.matchMedia?.('(prefers-color-scheme: dark)').matches;
 const bg = () => (dark() ? '#1a1d27' : '#ffffff');
@@ -38,47 +45,86 @@ export function paint(stops, mn, mx, v) {
   return stops.at(-1)[1];
 }
 
-let _hatch = null;
-function hatch(ctx) {
-  if (_hatch) return _hatch;
+/**
+ * One half-hour of the net grid. `exp` / `expCover` are null without an export meter.
+ * Returns { value: net kWh | null, hatch: null | 'bw' | 'green' | 'red', imp, exp, impSt, expSt }.
+ */
+export function cellOf(imp, impCover, exp, expCover, dayKey, slot) {
+  const impSt = slotState(imp, dayKey, slot, impCover);
+  const expSt = exp ? slotState(exp, dayKey, slot, expCover) : 'none';
+  const i = impSt === 'present' ? imp.get(dayKey).get(slot).kwh : null;
+  const e = expSt === 'present' ? exp.get(dayKey).get(slot).kwh : null;
+  const out = { value: null, hatch: null, imp: i, exp: e, impSt, expSt };
+  if (impSt === 'future') return out;
+  if (i != null) {
+    out.value = i - (e ?? 0);
+    if (expSt === 'missing') out.hatch = 'green';
+  } else if (impSt === 'missing') {
+    if (e != null) { out.value = -e; out.hatch = 'red'; } else out.hatch = 'bw';
+  } else if (e != null) {
+    out.value = -e;                     // import not in yet, or before its supply: the export alone
+  } else if (expSt === 'missing') {
+    out.hatch = 'green';
+  }
+  return out;
+}
+
+const _hatches = {};
+function hatch(ctx, kind) {
+  if (_hatches[kind]) return _hatches[kind];
+  const [base, line] = HATCH[kind];
   const c = document.createElement('canvas');
   c.width = c.height = 6;
   const x = c.getContext('2d');
-  x.fillStyle = '#000'; x.fillRect(0, 0, 6, 6);
-  x.strokeStyle = '#ffffff'; x.lineWidth = 1.2;
+  if (base) { x.fillStyle = base; x.fillRect(0, 0, 6, 6); }
+  x.strokeStyle = line; x.lineWidth = kind === 'bw' ? 1.2 : 1.6;
   x.beginPath(); x.moveTo(-1, 7); x.lineTo(7, -1); x.moveTo(-1, 1); x.lineTo(1, -1); x.moveTo(5, 7); x.lineTo(7, 5); x.stroke();
-  return (_hatch = ctx.createPattern(c, 'repeat'));
+  return (_hatches[kind] = ctx.createPattern(c, 'repeat'));
 }
 
 const fmtSlot = (s) => `${String(Math.floor(s / 2)).padStart(2, '0')}:${s % 2 ? '30' : '00'}`;
+const kwh = (v) => `${v.toFixed(3)} kWh`;
 
-/**
- * Draw `months` (oldest first, [{start,end}]) into `root`.
- * `days`: byDay() map; `cover`: slotState's cover; `label`: 'Import' | 'Export'.
- */
-export function renderHeatmap(root, { months, days, cover, label }) {
+/** Draw `months` (oldest first, [{start,end}]) into `root`. */
+export function renderHeatmap(root, { months, imp, impCover, exp, expCover }) {
   root.replaceChildren();
+  const grids = months.map((month) => {
+    const rows = daysBetween(month.start, month.end).map((k) => {
+      const exists = slotsOfDay(k);
+      const cells = [];
+      let total = 0, any = false;
+      for (let s = 0; s < 48; s++) {
+        if (!exists.has(s)) { cells.push(null); continue; }
+        const c = cellOf(imp, impCover, exp, expCover, k, s);
+        if (c.value != null) { total += c.value; any = true; }
+        cells.push(c);
+      }
+      return { k, cells, total: any ? total : null };
+    });
+    return { month, rows };
+  });
+
   // one scale over everything loaded, so months compare
-  let mn = 0, mx = 0, maxDay = 0;
-  for (const [, d] of days) {
-    let tot = 0;
-    for (const [, iv] of d) { mn = Math.min(mn, iv.kwh); mx = Math.max(mx, iv.kwh); tot += iv.kwh; }
-    maxDay = Math.max(maxDay, tot);
+  let mn = 0, mx = 0, maxAbsDay = 0;
+  for (const g of grids) {
+    for (const r of g.rows) {
+      for (const c of r.cells) if (c?.value != null) { mn = Math.min(mn, c.value); mx = Math.max(mx, c.value); }
+      if (r.total != null) maxAbsDay = Math.max(maxAbsDay, Math.abs(r.total));
+    }
   }
   const stops = kwhStops(mn, mx, bg());
-  root.append(legend(stops, mn, mx));
+  root.append(legend(stops, mn, mx, !!exp));
 
   const tip = document.createElement('div');
   tip.className = 'hm-tip';
   tip.hidden = true;
   root.append(tip);
 
-  let missingTotal = 0;
-  for (const month of [...months].reverse()) {
+  const anyNeg = mn < 0;
+  for (const { month, rows } of [...grids].reverse()) {
     const { y, m } = parseKey(month.start);
-    const ks = daysBetween(month.start, month.end);
     const W = LEFT + 48 * (CELL + GAP) + PAD + TOTAL_W + PAD;
-    const H = TOP + ks.length * (CELL + GAP) + PAD;
+    const H = TOP + rows.length * (CELL + GAP) + PAD;
     const wrap = document.createElement('section');
     wrap.className = 'hm-month';
     const h = document.createElement('h3');
@@ -96,8 +142,8 @@ export function renderHeatmap(root, { months, days, cover, label }) {
 
     const ctx = canvas.getContext('2d');
     ctx.scale(dpr, dpr);
-    ctx.fillStyle = axis();
     ctx.font = '10px system-ui, sans-serif';
+    ctx.fillStyle = axis();
     for (let s = 0; s < 48; s += 4) {
       ctx.save();
       ctx.translate(LEFT + s * (CELL + GAP) + CELL / 2, TOP - 6);
@@ -105,82 +151,86 @@ export function renderHeatmap(root, { months, days, cover, label }) {
       ctx.fillText(fmtSlot(s), 0, 0);
       ctx.restore();
     }
-    ctx.fillText(`${label} kWh/day`, LEFT + 48 * (CELL + GAP) + PAD, TOP - 8);
+    const totX = LEFT + 48 * (CELL + GAP) + PAD;
+    const zeroX = anyNeg ? totX + TOTAL_W / 2 : totX;
+    const barScale = maxAbsDay > 0 ? (anyNeg ? TOTAL_W / 2 : TOTAL_W) / maxAbsDay : 0;
+    ctx.fillText('Net kWh/day', totX, TOP - 8);
 
-    let missing = 0;
-    const cells = [];
-    ks.forEach((k, row) => {
+    let missImp = 0, missExp = 0;
+    const hit = [];
+    rows.forEach((r, row) => {
       const yy = TOP + row * (CELL + GAP);
-      const dow = new Date(`${k}T12:00:00Z`).getUTCDay();
+      const dow = new Date(`${r.k}T12:00:00Z`).getUTCDay();
       const weekend = dow === 0 || dow === 6;
       ctx.fillStyle = weekend ? (dark() ? '#e8eaf0' : '#1d2130') : axis();
       ctx.font = `${weekend ? '600 ' : ''}10px system-ui, sans-serif`;
       ctx.textAlign = 'right';
-      ctx.fillText(String(parseKey(k).d), LEFT - 6, yy + CELL - 4);
-      ctx.font = '10px system-ui, sans-serif';
+      ctx.fillText(String(parseKey(r.k).d), LEFT - 6, yy + CELL - 4);
       ctx.textAlign = 'left';
-      const exists = slotsOfDay(k);
-      const day = days.get(k);
-      let tot = 0;
-      for (let s = 0; s < 48; s++) {
+      ctx.font = '10px system-ui, sans-serif';
+      r.cells.forEach((c, s) => {
+        if (!c) return;
         const xx = LEFT + s * (CELL + GAP);
-        if (!exists.has(s)) continue;
-        const st = slotState(days, k, s, cover);
-        if (st === 'present') {
-          const v = day.get(s).kwh;
-          tot += v;
-          ctx.fillStyle = paint(stops, mn, mx, v);
-          ctx.fillRect(xx, yy, CELL, CELL);
-          if (v === 0) { ctx.strokeStyle = axis(); ctx.globalAlpha = 0.25; ctx.strokeRect(xx + 0.5, yy + 0.5, CELL - 1, CELL - 1); ctx.globalAlpha = 1; }
-        } else if (st === 'missing') {
-          missing++;
-          ctx.fillStyle = hatch(ctx);
+        if (c.impSt === 'missing') missImp++;
+        if (c.expSt === 'missing') missExp++;
+        if (c.value != null) {
+          ctx.fillStyle = paint(stops, mn, mx, c.value);
           ctx.fillRect(xx, yy, CELL, CELL);
         }
-        cells.push({ k, s, st, x: xx, y: yy });
-      }
-      if (tot > 0 && maxDay > 0) {
-        ctx.fillStyle = dark() ? '#5b8def' : '#3b6fd8';
-        const bw = (tot / maxDay) * TOTAL_W;
-        ctx.fillRect(LEFT + 48 * (CELL + GAP) + PAD, yy + 2, bw, CELL - 4);
+        if (c.hatch) {
+          ctx.fillStyle = hatch(ctx, c.hatch);
+          ctx.fillRect(xx, yy, CELL, CELL);
+        }
+        hit.push({ k: r.k, s, c, x: xx, y: yy });
+      });
+      if (r.total != null && barScale) {
+        const w = r.total * barScale;
+        ctx.fillStyle = r.total >= 0 ? (dark() ? '#e0794a' : '#d9622b') : (dark() ? '#45b37a' : '#2e9e5b');
+        ctx.fillRect(w >= 0 ? zeroX : zeroX + w, yy + 2, Math.abs(w), CELL - 4);
       }
     });
-    missingTotal += missing;
-    note.textContent = missing ? `${missing} half-hour${missing === 1 ? '' : 's'} missing` : '';
+    if (anyNeg) {
+      ctx.fillStyle = axis();
+      ctx.fillRect(zeroX, TOP - 2, 1, rows.length * (CELL + GAP));
+    }
+    const parts = [];
+    if (missImp) parts.push(`${missImp} import`);
+    if (missExp) parts.push(`${missExp} export`);
+    note.textContent = parts.length ? `${parts.join(', ')} half-hour${missImp + missExp === 1 ? '' : 's'} missing` : '';
 
-    canvas.addEventListener('mousemove', (e) => {
-      const r = canvas.getBoundingClientRect();
-      const px = e.clientX - r.left, py = e.clientY - r.top;
-      const c = cells.find((q) => px >= q.x && px < q.x + CELL && py >= q.y && py < q.y + CELL);
-      if (!c) { tip.hidden = true; return; }
-      const iv = days.get(c.k)?.get(c.s);
-      const what = c.st === 'present' ? `${iv.kwh.toFixed(3)} kWh`
-        : c.st === 'missing' ? 'no reading from Octopus' : c.st === 'pending' ? 'not in yet' : 'before the supply started';
-      tip.textContent = `${c.k} ${fmtSlot(c.s)} · ${what}`;
+    canvas.addEventListener('mousemove', (ev) => {
+      const b = canvas.getBoundingClientRect();
+      const px = ev.clientX - b.left, py = ev.clientY - b.top;
+      const q = hit.find((z) => px >= z.x && px < z.x + CELL && py >= z.y && py < z.y + CELL);
+      if (!q) { tip.hidden = true; return; }
+      const { c } = q;
+      const say = (st, v) => (st === 'present' ? kwh(v) : st === 'missing' ? 'missing' : st === 'pending' ? 'not in yet'
+        : st === 'outside' ? 'before supply' : st === 'future' ? '—' : '');
+      const bits = [`${q.k} ${fmtSlot(q.s)}`, `import ${say(c.impSt, c.imp)}`];
+      if (exp) bits.push(`export ${say(c.expSt, c.exp)}`);
+      if (c.value != null && exp) bits.push(`net ${kwh(c.value)}`);
+      tip.textContent = bits.join(' · ');
       tip.hidden = false;
-      tip.style.left = `${e.pageX + 12}px`;
-      tip.style.top = `${e.pageY + 12}px`;
+      tip.style.left = `${ev.pageX + 12}px`;
+      tip.style.top = `${ev.pageY + 12}px`;
     });
     canvas.addEventListener('mouseleave', () => { tip.hidden = true; });
   }
-  return { missing: missingTotal };
 }
 
-function legend(stops, mn, mx) {
+function legend(stops, mn, mx, withExport) {
   const el = document.createElement('div');
   el.className = 'hm-legend';
   const bar = document.createElement('canvas');
   bar.width = 200; bar.height = 12;
   const x = bar.getContext('2d');
   for (let i = 0; i < 200; i++) { x.fillStyle = paint(stops, 0, 199, i); x.fillRect(i, 0, 1, 12); }
-  const lo = document.createElement('span'), hi = document.createElement('span');
-  lo.textContent = `${mn.toFixed(2)} kWh`;
-  hi.textContent = `${mx.toFixed(2)} kWh`;
-  const sw = document.createElement('span');
-  sw.className = 'hm-swatch';
-  const miss = document.createElement('span');
-  miss.textContent = 'no reading from Octopus (missing)';
-  el.append(lo, bar, hi, sw, miss);
+  const span = (text, cls) => { const s = document.createElement('span'); s.textContent = text; if (cls) s.className = cls; return s; };
+  el.append(span(`${mn.toFixed(2)} kWh`), bar, span(`${mx.toFixed(2)} kWh${withExport ? ' (import − export)' : ''}`));
+  el.append(span('', 'hm-swatch bw'), span(withExport ? 'no import or export reading' : 'no reading from Octopus'));
+  if (withExport) {
+    el.append(span('', 'hm-swatch green'), span('export missing'));
+    el.append(span('', 'hm-swatch red'), span('import missing'));
+  }
   return el;
 }
-

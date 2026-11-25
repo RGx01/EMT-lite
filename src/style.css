@@ -44,7 +44,7 @@ select, input { background: var(--surface); border: 1px solid var(--border); bor
 .bill-rows th { text-align: left; font-weight: 500; padding: 4px 12px 4px 0; }
 .bill-rows td { padding: 4px 12px 4px 0; color: var(--muted); }
 .bill-rows td.num { text-align: right; color: var(--text); font-variant-numeric: tabular-nums; }
-.bill-rows tr:nth-last-child(1) th, .bill-rows tr:nth-last-child(1) td { border-top: 1px solid var(--border); }
+.bill-rows tr.total th, .bill-rows tr.total td { border-top: 1px solid var(--border); font-weight: 600; }
 .bill-notes { font-size: 13px; padding-left: 18px; margin: 12px 0 0; }
 .bill-notes .warn { color: var(--warn); }
 .billing-day { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 12px; margin-bottom: 12px; }
@@ -56,11 +56,16 @@ select, input { background: var(--surface); border: 1px solid var(--border); bor
 
 .hm-legend { display: flex; gap: 8px; align-items: center; font-size: 12px; color: var(--muted); margin-bottom: 8px; flex-wrap: wrap; }
 .hm-legend canvas { border: 1px solid var(--border); }
-.hm-swatch { display: inline-block; width: 14px; height: 14px; margin-left: 16px;
-  background: #000 repeating-linear-gradient(135deg, #fff 0 1.2px, transparent 1.2px 4px); }
+.hm-swatch { display: inline-block; width: 14px; height: 14px; margin-left: 16px; border: 1px solid var(--border); }
+.hm-swatch.bw { background: #000 repeating-linear-gradient(135deg, #fff 0 1.2px, transparent 1.2px 4px); }
+.hm-swatch.green { background: #ffcc99 repeating-linear-gradient(135deg, #00c853 0 1.6px, transparent 1.6px 4px); }
+.hm-swatch.red { background: #66bb88 repeating-linear-gradient(135deg, #ff1744 0 1.6px, transparent 1.6px 4px); }
 .hm-month { background: var(--surface); border: 1px solid var(--border); border-radius: 8px; padding: 8px 12px; margin-bottom: 12px; overflow-x: auto; }
 .hm-month h3 { margin: 0 0 4px; font-size: 15px; }
 .hm-note { font-size: 12px; font-weight: 400; color: var(--warn); }
 .hm-tip { position: absolute; z-index: 10; background: var(--surface); border: 1px solid var(--border); border-radius: 6px; padding: 4px 8px; font-size: 12px; pointer-events: none; box-shadow: 0 4px 12px rgba(0,0,0,.2); }
 #more { margin: 8px 0 24px; }
 #account-pick { margin-bottom: 12px; }
+.evidence { font-size: 13px; color: var(--muted); margin: -4px 0 12px; }
+.evidence ul { margin: 6px 0 0; padding-left: 18px; }
+.bill-rows tr.sub-head th { padding-top: 10px; font-size: 13px; color: var(--muted); font-weight: 600; }
