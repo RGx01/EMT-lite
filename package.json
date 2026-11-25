@@ -7,7 +7,8 @@
     "dev": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "vitest run"
+    "test": "vitest run",
+    "deploy": "(git diff --quiet HEAD || (echo 'Commit your changes before deploying: the site should match a commit.' && exit 1)) && npm test && npm run build && wrangler pages deploy dist --project-name emt-lite --branch main --commit-hash $(git rev-parse HEAD)"
   },
   "license": "SEE LICENSE IN LICENSE",
   "dependencies": {
@@ -15,6 +16,7 @@
   },
   "devDependencies": {
     "vite": "8.3.8",
-    "vitest": "5.1.2"
+    "vitest": "5.1.2",
+    "wrangler": "4.168.0"
   }
 }

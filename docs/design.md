@@ -78,9 +78,14 @@ Static hosting, free tier. Any of these will do:
 | Vercel | easy; `vercel.json` sets headers | Hobby (free) is non-commercial only; its strength (functions) is what we do not want |
 | Netlify | `_headers` like Cloudflare | no advantage over Cloudflare here |
 
-**Decided: Cloudflare Pages**, built from the EMT-Lite repository's `main`, launched as
-**EMT-Lite** on its free `*.pages.dev` address (for example `emt-lite.pages.dev`, if free). A custom
-domain can be added later without changing anything else.
+**Decided: Cloudflare Pages**, launched as **EMT-Lite** on its free address,
+<https://emt-lite.pages.dev/> (live 25 Nov 2026). A custom domain can be added later without changing
+anything else.
+
+**Built:** a classic Pages project, `emt-lite`, uploaded from a clean checkout of `main` with
+`npm run deploy` (Wrangler direct upload), not built by Cloudflare from GitHub: the site matches a
+commit that was tested here, and Cloudflare needs no access to the repository. The live headers match
+`public/_headers`.
 
 ## 4. Security
 
@@ -312,4 +317,7 @@ Not yet:
   export detection, the House/EV split and the measurement query all work on an IOG-SMB account
   with export. Its export meter sends zero readings at night, so a night is not hatched green.
 - **Business VAT.** The calendar is domestic (§5.3).
-- **Playwright CSP check** (§7). Checked by hand this time.
+- **Playwright CSP check** (§7). Checked by hand: on the live site too (25 Nov 2026), the demo loads
+  with no console errors and a request to any other host is blocked.
+- **Making the repository public**, which §2 requires before anyone else enters a key. Until then,
+  the live address is not shared.
