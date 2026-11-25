@@ -22,6 +22,10 @@ security-related with `build` + `preview`.
 
 **Try the demo** on the sign-in page loads a made-up account through the same code a real one uses.
 
+The bills EMT-Lite shows are worked out from Octopus's half-hourly data. They are **not
+authoritative** and may contain mistakes; the customer's Octopus statement is. The page says so on
+the sign-in page and on every bill card, with a link to raise an issue.
+
 ## Deploying
 
 The site is a Cloudflare Pages project, `emt-lite`, uploaded with Wrangler, not built by Cloudflare

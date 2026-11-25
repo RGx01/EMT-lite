@@ -59,6 +59,17 @@ export function vatNote(vat) {
     : `VAT at ${pct} added to Octopus’s ex-VAT costs: a business account, at the standard rate (your tariff does not show its VAT).`;
 }
 
+export const ISSUES_URL = 'https://github.com/RGx01/EMT-lite/issues/new/choose';
+
+/** The bill card's last note: these figures are worked out, not Octopus's bill. */
+function caveat() {
+  const li = el('li', 'caveat', 'Worked out from Octopus’s half-hourly data: not your bill, and it may contain mistakes. Your Octopus statement is the one that counts. Something wrong? ');
+  const a = el('a', null, 'Raise an issue');
+  a.href = ISSUES_URL; a.target = '_blank'; a.rel = 'noopener noreferrer';
+  li.append(a, '.');
+  return li;
+}
+
 function el(tag, cls, text) {
   const e = document.createElement(tag);
   if (cls) e.className = cls;
@@ -346,6 +357,7 @@ export class BillsView {
     if (s.split) notes.append(el('li', 'muted', 'Octopus can revise its House/EV split for some days after it first appears.'));
     if (s.pending) notes.append(el('li', 'muted', `${s.pending} half-hour${s.pending === 1 ? '' : 's'} not in from Octopus yet.`));
     notes.append(el('li', 'muted', vatNote(this.data.info.vat)));
+    notes.append(caveat());
     card.append(notes);
     return card;
   }
