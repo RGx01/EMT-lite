@@ -236,7 +236,8 @@ keyed by account, meters and month, with when it was fetched.
 - If IndexedDB is unavailable (a private window), the page asks Octopus as without the cache.
 
 Measured on the first real account: the first visit as before (about 90 s, 216 requests); the next
-**10 s and 20 requests**, 11 months from the device and 2 from Octopus.
+**10 s and 20 requests**, 11 months from the device and 2 from Octopus. Sign out checked the same
+day: the database gone, the remembered token and billing day gone, the key field empty.
 
 ## 7. Building it
 
