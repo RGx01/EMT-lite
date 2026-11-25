@@ -40,7 +40,7 @@ function redraw() {
     if (tab === 'bills') bills.render();
     else {
       renderHeatmap($('heatmap'), {
-        months: monthsToLoad(data.loaded.length).reverse(),
+        months: data.shownMonths().reverse(),
         imp: data.impDays, impCover: data.impCover,
         exp: data.info.export ? data.expDays : null, expCover: data.info.export ? data.expCover : null,
       });
@@ -111,18 +111,33 @@ async function start(info) {
   await loadMonths(monthsToLoad(monthsWanted));
 }
 
+// Months load MONTHS_AT_ONCE at a time, newest first. The calls are the same ones, so the
+// account's rate limit is spent no faster; they overlap Octopus's seconds-long answers.
+const MONTHS_AT_ONCE = 3;
+
 async function loadMonths(months) {
   $('more').hidden = true;
   const todo = months.filter((m) => !data.loaded.includes(m.start));
-  for (let i = 0; i < todo.length; i++) {
-    try {
-      await data.loadMonth(todo[i], (what) => status(`Loading ${what} (${i + 1} of ${todo.length})…`));
-    } catch (e) {
-      status(`Stopped: ${e.message}`);
-      return;
+  let next = 0, done = 0, failed = null;
+  const mine = data;
+  status(`Loading ${todo.length} month${todo.length === 1 ? '' : 's'} from Octopus…`);
+  const worker = async () => {
+    while (next < todo.length && !failed && data === mine) {
+      const m = todo[next++];
+      try {
+        await mine.loadMonth(m);
+      } catch (e) {
+        failed = failed || e;
+        return;
+      }
+      done++;
+      status(`Loaded ${done} of ${todo.length} months…`);
+      redraw();
     }
-    redraw();
-  }
+  };
+  await Promise.all(Array.from({ length: Math.min(MONTHS_AT_ONCE, todo.length) }, worker));
+  if (data !== mine) return;                  // signed out meanwhile
+  if (failed) { status(`Stopped: ${failed.message}`); return; }
   const exp = octo?.refreshExp ? new Date(octo.refreshExp * 1000) : null;
   status(keep && exp ? `Up to date. Remembered on this device until ${exp.toLocaleDateString('en-GB')}.` : 'Up to date.');
   $('more').hidden = false;

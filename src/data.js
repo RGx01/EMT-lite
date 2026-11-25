@@ -120,34 +120,49 @@ export class AccountData {
     return out.size ? out : null;
   }
 
-  async loadMonth(month, onProgress = () => {}) {
+  // Import and export are asked for at the same time: Octopus takes seconds over each page of a
+  // month (about 5 s for an IOG-SMB import page), and the two do not depend on each other.
+  async loadMonth(month) {
     const { number } = this.info;
     const imp = this.info.import;
-    if (imp) {
-      onProgress(`Import ${month.start.slice(0, 7)}`);
+    const importing = imp ? (async () => {
       const got = await this.octo.measurements(number, imp.mpan, month.start, month.end, 'CONSUMPTION');
-      await recoverCosts(this.octo, number, imp.mpan, got, 'CONSUMPTION', dayKeyOf);
-      this.imp.push(...got);
+      await recoverCosts(this.octo, number, imp.mpan, got, 'CONSUMPTION', dayKeyOf, Date.now(), imp.from);
       const ag = agreementAt(imp.agreements, midnight(month.start) + 15 * 86400000);
       const t = ag?.tariff;
-      if (t?.productCode && /AGILE/i.test(t.productCode)) {
-        onProgress(`Agile rates ${month.start.slice(0, 7)}`);
-        for (const r of await this.octo.publishedRates(t.productCode, t.tariffCode, month.start, month.end)) {
-          for (let s = r.from; s < Math.min(r.to, midnight(month.end)); s += HALF_HOUR) this.published.set(s, r.exc);
-        }
+      const rates = t?.productCode && /AGILE/i.test(t.productCode)
+        ? await this.octo.publishedRates(t.productCode, t.tariffCode, month.start, month.end) : [];
+      return { got, rates };
+    })() : Promise.resolve(null);
+    const exporting = this.info.export
+      ? this.octo.measurements(number, this.info.export.mpan, month.start, month.end, 'GENERATION')
+      : Promise.resolve(null);
+    const [i, e] = await Promise.all([importing, exporting]);
+    // nothing is added until the whole month is in, so a month is never half shown
+    if (i) {
+      this.imp.push(...i.got);
+      for (const r of i.rates) {
+        for (let s = r.from; s < Math.min(r.to, midnight(month.end)); s += HALF_HOUR) this.published.set(s, r.exc);
       }
     }
-    if (this.info.export) {
-      onProgress(`Export ${month.start.slice(0, 7)}`);
-      const got = await this.octo.measurements(number, this.info.export.mpan, month.start, month.end, 'GENERATION');
-      this.exp.push(...got);
-    }
+    if (e) this.exp.push(...e);
     this.loaded.push(month.start);
     this._rebuild();
   }
 
+  /** The months to show: the unbroken run of loaded months back from this one. Months load
+   *  several at a time, so a later one can arrive first; it waits until those between are in,
+   *  rather than showing them as gaps. Newest first. */
+  shownMonths(today = todayKey()) {
+    const out = [];
+    for (const m of monthsToLoad(this.loaded.length, today)) {
+      if (!this.loaded.includes(m.start)) break;
+      out.push(m);
+    }
+    return out;
+  }
+
   firstDay() {
-    const s = [...this.loaded].sort()[0];
-    return s || todayKey();
+    return this.shownMonths().at(-1)?.start || todayKey();
   }
 }

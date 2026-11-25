@@ -409,3 +409,70 @@ describe('export rate rounding', () => {
     expect(exportRateLine(day, [24, 25]).get(24)).toBeCloseTo(5);
   });
 });
+
+import { AccountData } from '../src/data.js';
+
+describe('loading months several at a time', () => {
+  // A fake Octopus whose answers arrive in a set order, whatever order they were asked in.
+  function fake(order) {
+    const waiting = new Map();
+    const octo = {
+      calls: [],
+      measurements(_n, mpan, from) {
+        octo.calls.push(`${mpan}:${from}`);
+        return new Promise((resolve) => waiting.set(`${mpan}:${from}`, () => resolve([])));
+      },
+      measurementsBetween: async () => [],
+      publishedRates: async () => [],
+    };
+    const release = async (k) => { waiting.get(k)(); await new Promise((r) => setTimeout(r, 0)); };
+    return { octo, release, order };
+  }
+  const info = { number: 'A-0000ABC7', import: { mpan: 'I', agreements: [], from: null }, export: { mpan: 'E', agreements: [], from: null }, billing: null };
+
+  it('asks for import and export at the same time', async () => {
+    const { octo, release } = fake();
+    const d = new AccountData(octo, info);
+    const p = d.loadMonth({ start: '2026-11-01', end: '2026-12-01' });
+    await new Promise((r) => setTimeout(r, 0));
+    expect(octo.calls).toEqual(['I:2026-11-01', 'E:2026-11-01']);
+    await release('I:2026-11-01'); await release('E:2026-11-01');
+    await p;
+    expect(d.loaded).toEqual(['2026-11-01']);
+  });
+  it('shows only the unbroken run of months back from now', async () => {
+    const { octo, release } = fake();
+    const d = new AccountData(octo, info);
+    const today = '2026-11-25';
+    const nov = d.loadMonth({ start: '2026-11-01', end: '2026-12-01' });
+    const oct = d.loadMonth({ start: '2026-10-01', end: '2026-11-01' });
+    await new Promise((r) => setTimeout(r, 0));
+    await release('I:2026-10-01'); await release('E:2026-10-01'); await oct;
+    expect(d.shownMonths(today)).toEqual([]);                 // October is in, November is not
+    await release('I:2026-11-01'); await release('E:2026-11-01'); await nov;
+    expect(d.shownMonths(today).map((m) => m.start)).toEqual(['2026-11-01', '2026-10-01']);
+  });
+});
+
+import { recoverCosts } from '../src/octopus.js';
+
+describe('cost recovery asks only where it can help', () => {
+  const now = Date.parse('2026-11-25T12:00:00Z');
+  const counting = () => { const o = { n: 0, measurements: async () => { o.n++; return []; }, measurementsBetween: async () => { o.n++; return []; } }; return o; };
+  const iv = (k, cost) => ({ start: midnight(k) + 20 * HALF_HOUR, kwh: 0.5, costExc: cost });
+  it('a month Octopus priced nothing in is not asked again', async () => {
+    const o = counting();
+    await recoverCosts(o, 'A', 'M', [iv('2026-03-03', null), iv('2026-03-04', null)], 'CONSUMPTION', dayKeyOf, now);
+    expect(o.n).toBe(0);
+  });
+  it('days before the supply started are not asked', async () => {
+    const o = counting();
+    await recoverCosts(o, 'A', 'M', [iv('2026-06-02', null), iv('2026-06-10', 5)], 'CONSUMPTION', dayKeyOf, now, '2026-06-04');
+    expect(o.n).toBe(0);
+  });
+  it('a hole among priced days is asked: the day, then noon to noon', async () => {
+    const o = counting();
+    await recoverCosts(o, 'A', 'M', [iv('2026-06-12', null), iv('2026-06-10', 5)], 'CONSUMPTION', dayKeyOf, now, '2026-06-04');
+    expect(o.n).toBe(3);
+  });
+});

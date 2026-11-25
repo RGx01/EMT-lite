@@ -200,8 +200,16 @@ Kraken limits by query points per hour, **per account**, so each user spends the
 experience is that the limit is shared by everything using the account. A user running EMT, or
 Octopus's app, takes from the same pot.
 
-- Requests go one at a time, paced, with EMT's backoff on the rate-limit error `KT-CT-1199`.
-- Months come **newest first**. The page is useful after the first answer and fills backwards.
+- Requests are paced (400 ms between starts), with EMT's backoff on the rate-limit error `KT-CT-1199`.
+- Months come **newest first**, **three at a time**, each month's import and export together
+  (25 Nov 2026). Octopus takes seconds over each page (about 5 s for an IOG-SMB import page of 500
+  half-hours, 1.5 s for export), so one at a time took about 3½ minutes for 13 months; overlapped,
+  about 45 s, with the same number of calls. A month is shown only once it and every newer month
+  are in, so a month still loading never appears as gaps.
+- The query asks only `costExclTax` (VAT comes from the calendar), not `costInclTax`.
+- Cost recovery (§5.3) is not asked for the last three days, for days before the supply started,
+  or for a month Octopus priced nothing in. On the first real account the months before its
+  Octopus supply cost two requests a day each, about 90 a month, for nothing.
 - **History depth defaults to 13 months** (enough for *vs last year*). "Load more" goes further.
 
 ## 6. Cache

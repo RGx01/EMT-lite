@@ -69,7 +69,10 @@ export class Octopus {
     if (!this.token) throw new OctopusError('Not signed in.');
     if (this.tokenExp && Date.now() / 1000 > this.tokenExp - REFRESH_SKEW_S) {
       if (!this.refreshToken) throw new OctopusError('Your Octopus session has expired. Paste your API key again.');
-      await this._obtain({ refreshToken: this.refreshToken });
+      // requests run several at a time: the first to notice refreshes, the rest wait for it
+      this._refreshing = this._refreshing || this._obtain({ refreshToken: this.refreshToken })
+        .finally(() => { this._refreshing = null; });
+      await this._refreshing;
     }
   }
 
@@ -195,7 +198,7 @@ export class Octopus {
           utilityFilters: [{ electricityFilters: { readingFrequencyType: THIRTY_MIN_INTERVAL,
             marketSupplyPointId: $mpan, readingDirection: ${dir} } }]) {
           edges { node { value unit ... on IntervalMeasurementType { startAt endAt
-            metaData { statistics { type label value costInclTax { estimatedAmount } costExclTax { estimatedAmount } } } } } }
+            metaData { statistics { type label value costExclTax { estimatedAmount } } } } } }
           pageInfo { hasNextPage endCursor } } } } }`;
     const out = [];
     let after = null;
@@ -235,11 +238,15 @@ export class Octopus {
 
 /** Fill costs Octopus left out of a month's answer: ask those local days, then noon to noon
  *  (EMT's recover_measurement_costs). Mutates and returns `intervals`. */
-export async function recoverCosts(octo, number, mpan, intervals, direction, dayKeyOf, now = Date.now()) {
-  // The last three days are usually not priced yet: asking again would only spend the account's
-  // rate limit. Recovery is for the older holes a month's answer leaves.
+export async function recoverCosts(octo, number, mpan, intervals, direction, dayKeyOf, now = Date.now(), supplyFrom = null) {
+  // Recovery is for the holes a month's answer leaves among costs Octopus does have. Not asked:
+  //  - the last three days, usually not priced yet;
+  //  - days before the supply started (another supplier's kWh: Octopus prices none of it);
+  //  - a month Octopus priced nothing in at all: asking day by day would find nothing either.
+  if (!intervals.some((iv) => iv.costExc != null)) return intervals;
   const recent = dayKeyOf(now - 3 * 86400000);
-  const lacking = () => intervals.filter((iv) => iv.costExc == null && iv.kwh > 0 && dayKeyOf(iv.start) < recent);
+  const lacking = () => intervals.filter((iv) => iv.costExc == null && iv.kwh > 0 && dayKeyOf(iv.start) < recent
+    && (!supplyFrom || dayKeyOf(iv.start) >= supplyFrom));
   const merge = (got) => {
     const by = new Map(got.filter((g) => g.costExc != null).map((g) => [g.start, g]));
     for (const iv of intervals) {
