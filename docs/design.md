@@ -3,8 +3,8 @@
 *Design, 25 Nov 2026. **Being built** (first pass 25 Nov 2026, §10). Its six open questions were decided on 25 Nov 2026 (§9). Almost everything it knows about Octopus,
 EMT learned first: a file named here without a repository (`kraken_api_client.py`,
 `web/templates/heatmap_module.html`, …) is in [RGx01/EMT](https://github.com/RGx01/EMT).
-This repository is private while the design is drafted, and goes public before the first user
-enters a key (§2).*
+This repository was private while the design was drafted, and went public on 25 Nov 2026, before
+anyone but its author entered a key (§2).*
 
 ---
 
@@ -40,11 +40,10 @@ A web page for an Octopus customer **without Home Assistant**. They paste their 
 
 **Around the page.** The page's own header bar (EMT-Lite, the account, Bills / Heatmap, Sign out)
 stays at the top on every view; the bills' bar sticks just under it. On a wide screen the header
-bar also says *Got Home Assistant? Try EMT for a richer experience*, linking to Home Assistant's
-add-repository page for EMT and to EMT on GitHub. The footer bar, always in view at the bottom of
+bar also says *Got Home Assistant? Try EMT for a richer experience*, linking EMT on GitHub, with
+Home Assistant's own *Add app repository to My* badge linking to its add-repository page for EMT. The footer bar, always in view at the bottom of
 the window, carries the same, for narrow screens,
-and a link to this repository's issues, for problems and suggestions (it works for others only
-once the repository is public).
+and a link to this repository's issues, for problems and suggestions.
 
 **Colours** are Okabe–Ito, distinguishable with red-green colour blindness: House off-peak / peak
 sky blue / blue, EV off-peak / peak orange / vermillion, export bluish green, the EV rate reddish
@@ -100,11 +99,13 @@ commit that was tested here, and Cloudflare needs no access to the repository. T
 ## 4. Security
 
 1. **Content-Security-Policy**, as a response header:
-   `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data:;
+   `default-src 'none'; script-src 'self'; style-src 'self'; img-src 'self' data: https://my.home-assistant.io;
    connect-src https://api.octopus.energy; font-src 'self'; frame-ancestors 'none';
    base-uri 'none'; form-action 'none'`.
    `connect-src` is the key line: even code injected into the page could not send the key anywhere
-   but Octopus.
+   but Octopus. `img-src` also allows `my.home-assistant.io`, for Home Assistant's official
+   *Add app repository to My* badge on the EMT advert, linked as EMT's README links it: the
+   visitor's browser fetches that image (no referrer), and an image request cannot carry the key.
 2. **No third-party code at runtime.** No analytics, no CDN. EMT loads Chart.js and
    `chartjs-chart-matrix` from cdnjs and jsDelivr; EMT-Lite **bundles** them, pinned with a
    lockfile. Every dependency is reviewed when it is bumped.
@@ -329,5 +330,5 @@ Not yet:
 - **Business VAT.** The calendar is domestic (§5.3).
 - **Playwright CSP check** (§7). Checked by hand: on the live site too (25 Nov 2026), the demo loads
   with no console errors and a request to any other host is blocked.
-- **Making the repository public**, which §2 requires before anyone else enters a key. Until then,
-  the live address is not shared.
+- ~~**Making the repository public**, which §2 requires before anyone else enters a key.~~ Done
+  25 Nov 2026.
