@@ -1,0 +1,24 @@
+version: 2
+updates:
+  # npm packages: weekly, grouped into one PR. Security fixes come at once. PRs go to dev, as every
+  # change does (CONTRIBUTING.md). Versions are pinned exactly, so each bump is a reviewed change.
+  - package-ecosystem: "npm"
+    directory: "/"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    open-pull-requests-limit: 5
+    commit-message:
+      prefix: "deps"
+    groups:
+      npm:
+        patterns: ["*"]
+
+  # The workflows' actions, pinned to commit SHAs (a tag can be moved; a SHA cannot).
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    target-branch: "dev"
+    schedule:
+      interval: "weekly"
+    commit-message:
+      prefix: "ci"

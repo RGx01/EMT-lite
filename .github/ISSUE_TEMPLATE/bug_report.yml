@@ -1,0 +1,51 @@
+name: Something is wrong
+description: A figure, chart or heatmap that looks wrong, or the page not working
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        **Never paste your API key**, account number, MPAN, address or bill amounts here: this
+        repository is public. Blur them in screenshots. If your key was ever shown anywhere,
+        revoke it in your Octopus account under *Personal details → API access*.
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened, and what did you expect?
+      description: Which view (Bills or Heatmap), which period or day, and what looks wrong.
+    validations:
+      required: true
+  - type: input
+    id: tariff
+    attributes:
+      label: Your tariff
+      description: For example Intelligent Octopus Go, Agile, Flexible, Economy 7. Not your tariff code.
+  - type: dropdown
+    id: account
+    attributes:
+      label: Account type
+      options: [Domestic, Business, "Not sure"]
+  - type: checkboxes
+    id: export
+    attributes:
+      label: Meters
+      options:
+        - label: I have an export meter (solar or a battery exporting)
+  - type: input
+    id: browser
+    attributes:
+      label: Browser and device
+      description: For example Safari on iPhone, Chrome on Windows.
+  - type: textarea
+    id: console
+    attributes:
+      label: Anything in the browser console
+      description: Optional. Errors only; check they contain no account details.
+      render: text
+  - type: checkboxes
+    id: privacy
+    attributes:
+      label: Privacy
+      options:
+        - label: This issue contains no API key, account number, MPAN, address or bill amounts.
+          required: true

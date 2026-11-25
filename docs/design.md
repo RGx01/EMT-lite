@@ -280,8 +280,18 @@ day: the database gone, the remembered token and billing day gone, the key field
   standing charge, VAT, off-peak and peak. In EMT that is Python (`bill_card.py`,
   `billing_view.py`). In EMT-Lite it is JavaScript, so it has its own tests.
 - **Tests:** Vitest for the arithmetic and period cutting, with recorded (fictional) Octopus
-  answers as fixtures. One Playwright check confirms the built page loads under its CSP with no
-  violations.
+  answers as fixtures. A Playwright check (`e2e/csp.spec.js`, built 25 Nov 2026) serves the built
+  page with `public/_headers` and runs the demo in Chromium. It fails on any CSP violation, any
+  console error, or a request to a host other than the page and the HA badge's. It also checks that
+  a request to another host is blocked.
+- **CI** (`.github/workflows/`, 25 Nov 2026; CONTRIBUTING.md):
+  - Unit tests with a build, and the CSP check, on every pull request. Both are required on `main`
+    and `dev`.
+  - CodeQL.
+  - A weekly **Kraken schema check**: every GraphQL document in `src/queries.js` is validated
+    against Octopus's live schema, and an issue opens for anything deprecated or removed. The same
+    check runs on a pull request that changes a query.
+- **Branches:** work goes to `dev` (live at `dev.emt-lite.pages.dev`); a release is `dev` → `main`.
 - **Licence:** PolyForm Noncommercial, as EMT.
 
 ## 8. Rejected
@@ -335,7 +345,6 @@ Not yet:
   export detection, the House/EV split and the measurement query all work on an IOG-SMB account
   with export. Its export meter sends zero readings at night, so a night is not hatched green.
 - ~~**Business VAT.**~~ Built 25 Nov 2026 (§5.3). Not yet tried on a real business account.
-- **Playwright CSP check** (§7). Checked by hand: on the live site too (25 Nov 2026), the demo loads
-  with no console errors and a request to any other host is blocked.
+- ~~**Playwright CSP check** (§7).~~ Built 25 Nov 2026, run in CI on every pull request.
 - ~~**Making the repository public**, which §2 requires before anyone else enters a key.~~ Done
   25 Nov 2026.
