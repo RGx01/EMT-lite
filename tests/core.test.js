@@ -519,3 +519,55 @@ describe('cost recovery, in EMT\u2019s order', () => {
   });
 });
 
+
+import { memoryCache, reusable, SETTLE_DAYS, CACHE_SHAPE } from '../src/cache.js';
+
+describe('the device cache', () => {
+  const info = { number: 'A-0000ABC7', import: { mpan: '2600000000001', agreements: [], from: null }, export: null, billing: null };
+  const sep = { start: '2026-09-01', end: '2026-10-01' };
+  const counting = () => {
+    const o = { n: 0,
+      measurements: async (_a, _m, from) => { o.n++; return from === '2026-09-01' ? [{ start: midnight('2026-09-01'), kwh: 0.5, costExc: 12, standingExc: 1, offPeak: false, split: null }] : []; },
+      measurementsBetween: async () => { o.n++; return []; }, publishedRates: async () => [] };
+    return o;
+  };
+  it('a month fetched once it had settled is used from the device, with no request', async () => {
+    const cache = memoryCache();
+    const first = new AccountData(counting(), info, cache);
+    const realNow = Date.now;
+    Date.now = () => midnight('2026-10-01') + (SETTLE_DAYS + 1) * 86400000;
+    try {
+      expect(await first.loadMonth(sep)).toBe('octopus');
+      const o = counting();
+      const again = new AccountData(o, info, cache);
+      expect(await again.loadMonth(sep)).toBe('device');
+      expect(o.n).toBe(0);
+      expect(again.imp).toHaveLength(1);
+      expect(again.impDays.get('2026-09-01').get(0).costExc).toBe(12);
+    } finally {
+      Date.now = realNow;
+    }
+  });
+  it('a month fetched before it had settled is asked again', async () => {
+    const cache = memoryCache();
+    const realNow = Date.now;
+    Date.now = () => midnight('2026-10-05');
+    try {
+      await new AccountData(counting(), info, cache).loadMonth(sep);
+    } finally {
+      Date.now = realNow;
+    }
+    const o = counting();
+    expect(await new AccountData(o, info, cache).loadMonth(sep)).toBe('octopus');
+    expect(o.n).toBeGreaterThan(0);
+  });
+  it('an entry of an older shape is asked again', () => {
+    expect(reusable({ shape: CACHE_SHAPE - 1, fetchedAt: Date.now() }, sep)).toBe(false);
+    expect(reusable({ shape: CACHE_SHAPE, fetchedAt: Date.now() }, sep)).toBe(true);
+  });
+  it('without a cache (Remember me off), every month is asked', async () => {
+    const o = counting();
+    expect(await new AccountData(o, info, null).loadMonth(sep)).toBe('octopus');
+    expect(o.n).toBeGreaterThan(0);
+  });
+});

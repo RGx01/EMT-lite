@@ -1,6 +1,7 @@
 import { Octopus } from './octopus.js';
 import { AccountData, describeAccount, monthsToLoad, DEFAULT_MONTHS, billingFromDay, chooseBilling } from './data.js';
 import { DemoOctopus, demoAccountInfo, DEMO_NUMBER } from './demo.js';
+import { deviceCache, deleteDeviceCache } from './cache.js';
 import { BillsView } from './bills.js';
 import { renderHeatmap } from './heatmap.js';
 
@@ -56,8 +57,21 @@ function signedIn(who) {
   $('who').textContent = who;
 }
 
-function signOut() {
+/** Forget this device: the remembered token and billing days, and the month cache. */
+async function forgetDevice() {
   forget();
+  await data?.cache?.close?.();
+  await deleteDeviceCache();
+}
+
+/** Sign out: forget the device, and back to the sign-in page. */
+async function signOut() {
+  await forgetDevice();
+  resetPage();
+}
+
+/** Back to the sign-in page, keeping what this device remembers (after an error). */
+function resetPage() {
   octo?.signOut?.();
   bills?.destroyCharts();
   octo = data = bills = null;
@@ -96,7 +110,9 @@ function persist(extra = {}) {
 }
 
 async function start(info) {
-  data = new AccountData(octo, info);
+  // the device cache only when the user asked to be remembered, and never for the demo
+  const cache = keep && info.number !== DEMO_NUMBER ? deviceCache() : null;
+  data = new AccountData(octo, info, cache);
   bills = new BillsView($('view-bills'), data, {
     // A day the user chooses holds for this visit, and is remembered with the account when the
     // browser is remembering it (design §4.4).
@@ -118,14 +134,14 @@ const MONTHS_AT_ONCE = 3;
 async function loadMonths(months) {
   $('more').hidden = true;
   const todo = months.filter((m) => !data.loaded.includes(m.start));
-  let next = 0, done = 0, failed = null;
+  let next = 0, done = 0, fromDevice = 0, failed = null;
   const mine = data;
   status(`Loading ${todo.length} month${todo.length === 1 ? '' : 's'} from Octopus…`);
   const worker = async () => {
     while (next < todo.length && !failed && data === mine) {
       const m = todo[next++];
       try {
-        await mine.loadMonth(m);
+        if ((await mine.loadMonth(m)) === 'device') fromDevice++;
       } catch (e) {
         failed = failed || e;
         return;
@@ -139,7 +155,8 @@ async function loadMonths(months) {
   if (data !== mine) return;                  // signed out meanwhile
   if (failed) { status(`Stopped: ${failed.message}`); return; }
   const exp = octo?.refreshExp ? new Date(octo.refreshExp * 1000) : null;
-  status(keep && exp ? `Up to date. Remembered on this device until ${exp.toLocaleDateString('en-GB')}.` : 'Up to date.');
+  const kept = fromDevice ? ` ${fromDevice} settled month${fromDevice === 1 ? '' : 's'} from this device, ${todo.length - fromDevice} from Octopus.` : '';
+  status((keep && exp ? `Up to date. Remembered on this device until ${exp.toLocaleDateString('en-GB')}.` : 'Up to date.') + kept);
   $('more').hidden = false;
 }
 
@@ -169,7 +186,7 @@ async function signInAndLoad(signIn) {
     $('who').textContent = number;
     await start(info);
   } catch (e) {
-    signOut();
+    resetPage();
     showError(e.message || String(e));
   }
 }
@@ -177,6 +194,8 @@ async function signInAndLoad(signIn) {
 $('key-form').addEventListener('submit', (e) => {
   e.preventDefault();
   keep = $('remember').checked;
+  // not remembering: nothing from an earlier remembered visit stays on this device
+  if (!keep) forgetDevice();
   const key = $('key').value;
   $('key').value = '';
   signInAndLoad((o) => o.signInWithKey(key));
@@ -205,6 +224,6 @@ if (saved?.rt && (!saved.rtExp || saved.rtExp * 1000 > Date.now())) {
   $('remember').checked = true;
   signInAndLoad((o) => o.signInWithRefreshToken(saved.rt));
 } else if (saved) {
-  forget();
+  forgetDevice();                 // the remembered sign-in has expired: forget its cache with it
 }
 

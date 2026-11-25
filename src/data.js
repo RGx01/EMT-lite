@@ -2,6 +2,7 @@
 // at a time, newest first. Everything is held in memory; nothing is stored here.
 
 import { recoverCosts } from './octopus.js';
+import { reusable, monthKey, CACHE_SHAPE } from './cache.js';
 import { byDay } from './measurements.js';
 import { anchorFromBillingDay } from './periods.js';
 import { addMonths, addDays, parseKey, todayKey, dayKeyOf, midnight, HALF_HOUR, slotOf, dayWindows } from './time.js';
@@ -91,9 +92,10 @@ export function monthsToLoad(count, today = todayKey()) {
 }
 
 export class AccountData {
-  constructor(octo, info) {
+  constructor(octo, info, cache = null) {
     this.octo = octo;
     this.info = info;
+    this.cache = cache;           // the device cache (design §6), or null: Remember me off, or the demo
     this.imp = [];
     this.exp = [];
     this.published = new Map();   // slot start ms → p/kWh exc VAT (Agile)
@@ -126,6 +128,29 @@ export class AccountData {
   // and export together. Small asks are what EMT found reliable: its 60-day asks timed out where
   // 30-day ones landed (EMT CHANGELOG, 6 Nov 2026). The Octopus client keeps four in flight.
   async loadMonth(month) {
+    const key = monthKey(this.info, month);
+    const kept = this.cache ? await this.cache.get(key) : null;
+    if (reusable(kept, month)) {
+      this._add(month, kept.imp || [], kept.exp || [], kept.rates || []);
+      return 'device';
+    }
+    const fresh = await this._fetchMonth(month);
+    await this.cache?.put(key, { shape: CACHE_SHAPE, fetchedAt: Date.now(), ...fresh });
+    this._add(month, fresh.imp, fresh.exp, fresh.rates);
+    return 'octopus';
+  }
+
+  _add(month, imp, exp, rates) {
+    this.imp.push(...imp);
+    if (this.info.export) this.exp.push(...exp);
+    for (const r of rates) {
+      for (let s = r.from; s < Math.min(r.to ?? Infinity, midnight(month.end)); s += HALF_HOUR) this.published.set(s, r.exc);
+    }
+    this.loaded.push(month.start);
+    this._rebuild();
+  }
+
+  async _fetchMonth(month) {
     const { number } = this.info;
     const imp = this.info.import;
     const windows = dayWindows(month.start, month.end, WINDOW_DAYS);
@@ -142,16 +167,9 @@ export class AccountData {
     })() : Promise.resolve(null);
     const exporting = this.info.export ? fetchAll(this.info.export.mpan, 'GENERATION') : Promise.resolve(null);
     const [i, e] = await Promise.all([importing, exporting]);
-    // nothing is added until the whole month is in, so a month is never half shown
-    if (i) {
-      this.imp.push(...i.got);
-      for (const r of i.rates) {
-        for (let s = r.from; s < Math.min(r.to, midnight(month.end)); s += HALF_HOUR) this.published.set(s, r.exc);
-      }
-    }
-    if (e) this.exp.push(...e);
-    this.loaded.push(month.start);
-    this._rebuild();
+    // nothing is added until the whole month is in, so a month is never half shown. A rate's
+    // open end (Infinity) is stored as null: IndexedDB keeps it, but plainly.
+    return { imp: i?.got || [], exp: e || [], rates: (i?.rates || []).map((r) => ({ ...r, to: Number.isFinite(r.to) ? r.to : null })) };
   }
 
   /** The months to show: the unbroken run of loaded months back from this one. Months load

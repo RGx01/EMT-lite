@@ -215,17 +215,28 @@ Octopus's app, takes from the same pot.
 - Measured on the first real account (IOG-SMB with export, 25 Nov 2026): one request at a time,
   month windows, about 3½ minutes for 13 months (an import page took about 5 s). Now about 90 s
   and 216 requests, of which about 80 fetch and the rest recover costs; each request about 1 s.
-  The 400 ms between starts is now the limit. Re-fetching settled months on every visit is the
-  waste left: §6's cache is the next saving.
+  The 400 ms between starts is now the limit. With *Remember me*, settled months then come from
+  the device (§6).
 - **History depth defaults to 13 months** (enough for *vs last year*). "Load more" goes further.
 
 ## 6. Cache
 
-Per account, in **IndexedDB on the user's device**: each month's intervals, with when they were
-fetched. A month that has fully settled is kept. The current month and the month before it are
-re-fetched on each visit, because Octopus fills them in late. Nothing is stored unless the user
-opted in to *Remember me* (§4.4). Otherwise it is memory only, gone with the tab. "Forget me"
-deletes the database.
+Built 25 Nov 2026 (`src/cache.js`). Only when the user ticked *Remember me*, and never for the demo:
+each month's answer from Octopus (import, export, Agile rates) in **IndexedDB on the user's device**,
+keyed by account, meters and month, with when it was fetched.
+
+- **A month is settled 35 days after it ends** (`SETTLE_DAYS`): Octopus's late readings, its cost
+  recovery and its House/EV split revisions (EMT holds a split back up to 28 days) have had their
+  time. A cached month is used only if it was **fetched** after that; anything fetched earlier is
+  asked again and stored again. So the newest two months come from Octopus on every visit.
+- An entry of an older stored shape (`CACHE_SHAPE`) is asked again.
+- **Sign out** deletes the database, as does signing in with *Remember me* unticked and a
+  remembered sign-in that has expired. A sign-in **error** keeps them: a network blip must not
+  throw away what the user asked to be remembered (before 25 Nov 2026 it did, token included).
+- If IndexedDB is unavailable (a private window), the page asks Octopus as without the cache.
+
+Measured on the first real account: the first visit as before (about 90 s, 216 requests); the next
+**10 s and 20 requests**, 11 months from the device and 2 from Octopus.
 
 ## 7. Building it
 
@@ -295,6 +306,5 @@ Not yet:
 - ~~Tried with a real key.~~ Done 25 Nov 2026: sign-in, Remember me, account discovery, statements,
   export detection, the House/EV split and the measurement query all work on an IOG-SMB account
   with export. Its export meter sends zero readings at night, so a night is not hatched green.
-- **The IndexedDB cache** (§6). Everything is in memory; a remembered device re-fetches.
 - **Business VAT.** The calendar is domestic (§5.3).
 - **Playwright CSP check** (§7). Checked by hand this time.
