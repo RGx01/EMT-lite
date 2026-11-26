@@ -121,8 +121,14 @@ export function byDay(intervals) {
     let day = days.get(k);
     if (!day) days.set(k, (day = new Map()));
     const prev = day.get(slot);
-    if (!prev) { day.set(slot, { ...iv, split: iv.split ? structuredClone(iv.split) : null, starts: [iv.start] }); continue; }
+    // `parts` keeps each reading's own kWh and cost: an Agile statement rounds each one (bill.js)
+    if (!prev) {
+      day.set(slot, { ...iv, split: iv.split ? structuredClone(iv.split) : null, starts: [iv.start],
+        parts: [{ start: iv.start, kwh: iv.kwh, costExc: iv.costExc }] });
+      continue;
+    }
     prev.starts.push(iv.start);
+    prev.parts.push({ start: iv.start, kwh: iv.kwh, costExc: iv.costExc });
     prev.kwh += iv.kwh;
     prev.costExc = prev.costExc == null || iv.costExc == null ? (prev.costExc ?? iv.costExc) : prev.costExc + iv.costExc;
     prev.standingExc = prev.standingExc == null || iv.standingExc == null
