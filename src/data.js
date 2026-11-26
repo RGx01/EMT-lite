@@ -29,6 +29,16 @@ export function agreementAt(agreements, ms) {
   }) || null;
 }
 
+/** An Agile tariff (the AGILE family, Agile Outgoing included), by its product or tariff code. */
+export const isAgile = (tariff) => /AGILE/i.test(`${tariff?.productCode || ''} ${tariff?.tariffCode || ''}`);
+
+/** A predicate on a half-hour's start (ms): the agreement in force then is Agile. Null when no
+ *  agreement is, so an account never on Agile passes nothing (EMT's statement_kwh.covers). */
+export function agileOn(agreements) {
+  if (!(agreements || []).some((a) => isAgile(a.tariff))) return null;
+  return (ms) => isAgile(agreementAt(agreements, ms)?.tariff);
+}
+
 function meterOf(mp) {
   const ags = (mp.agreements || []).slice().sort((a, b) => String(a.validFrom).localeCompare(String(b.validFrom)));
   return { mpan: mp.mpan, agreements: ags, from: dateKey(ags[0]?.validFrom) };

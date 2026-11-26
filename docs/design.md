@@ -259,6 +259,19 @@ What EMT learned the hard way, which EMT-Lite starts with:
     the change). Each day's table note does the same for that day.
   - Before this, the card summed VAT-inclusive pence and rounded only for display, so its rows could
     miss the total by a penny and the export credit was taken off unrounded.
+  - **On Agile, each half-hour at the statement's kWh** (26 Nov 2026; EMT `statement_kwh`,
+    `agile_bill`, EMT #253). An Agile statement prices every half-hour at its rate × its kWh rounded
+    to 0.01, **half to even** (0.005 → 0.00, 1.945 → 1.94). Octopus's API, and so EMT-Lite, carry the
+    meter's 0.001 kWh and a cost at that kWh, so a home running from a battery, with hundreds of
+    few-watt-hour half-hours a month, read above its statement.
+    - Which half-hours: those whose agreement in force is in the AGILE family, by product or tariff
+      code (`isAgile`, `agileOn`). That covers import, and Agile Outgoing export. Other half-hours keep
+      Octopus's cost: an Intelligent statement charges Octopus's own cost.
+    - How: the cost is scaled by statement kWh ÷ meter kWh (`statementOf`), an estimated cost too.
+      Each of a clocks-back half-hour's two readings is rounded on its own (`parts`, kept by `byDay`).
+    - Where: the bill card's lines and kWh (`billKwh`, `billExportKwh`), and the day headers' £,
+      which come from the same `summarise`. The heatmap, the day charts and the day tables show the
+      meter's kWh (`kwh`, `exportKwh`). The card says so, with the meter's figures when they differ.
 - **Business VAT** (built 25 Nov 2026). Kraken's `account.accountType` is `BUSINESS…` for a business
   account. Such an account pays the rate its import tariff carries (standing charge inc VAT ÷
   `preVatStandingCharge`; every tariff type has both). The rate comes from the agreement in force
