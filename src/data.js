@@ -109,6 +109,16 @@ export function chooseBilling({ userDay = null, info = null, trigger = null, tod
 }
 
 /** The local months to load, newest first: `count` months ending with this one. */
+/** How many days back Octopus's figures are provisional: a smart-charge dispatch is often re-banded,
+ *  and the House / EV split corrected, a day or two after Octopus first prices a day. */
+export const PROVISIONAL_DAYS = 3;
+
+/** The loaded months holding today or a provisional day: what a refresh asks Octopus for again. */
+export function provisionalMonths(loaded, today = todayKey()) {
+  const from = addDays(today, -PROVISIONAL_DAYS);
+  return monthsToLoad(2, today).filter((m) => loaded.includes(m.start) && m.end > from && m.start <= today);
+}
+
 export function monthsToLoad(count, today = todayKey()) {
   const { y, m } = parseKey(today);
   const out = [];
@@ -204,6 +214,21 @@ export class AccountData {
     }
     this.loaded.push(month.start);
     this._rebuild();
+  }
+
+  /** Ask Octopus for a loaded month again, and put its answer in place of what was there: a day
+   *  re-priced since, or costs that have arrived. */
+  async refreshMonth(month) {
+    const fresh = await this._fetchMonth(month);
+    await this.cache?.put(monthKey(this.info, month), { shape: CACHE_SHAPE, fetchedAt: Date.now(), ...fresh });
+    const lo = midnight(month.start), hi = midnight(month.end);
+    const outside = (iv) => iv.start < lo || iv.start >= hi;
+    this.imp = this.imp.filter(outside);
+    this.exp = this.exp.filter(outside);
+    this.gas = this.gas.filter(outside);
+    for (const t of [...this.published.keys()]) if (t >= lo && t < hi) this.published.delete(t);
+    this.loaded = this.loaded.filter((s) => s !== month.start);
+    this._add(month, fresh.imp, fresh.exp, fresh.rates, fresh.gas);
   }
 
   async _fetchMonth(month) {
