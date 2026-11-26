@@ -10,7 +10,7 @@ import { summarise, pounds, penny } from './bill.js';
 import { vatFor } from './vat.js';
 import { rateLine, solid, sideRateLine, exportRateLine, offWindowOf, awaitingCost } from './rates.js';
 import { daysBetween, slotsOfDay, todayKey, parseKey, addDays } from './time.js';
-import { PROVISIONAL_DAYS } from './data.js';
+import { PROVISIONAL_DAYS, agileOn } from './data.js';
 
 export { PROVISIONAL_DAYS };
 
@@ -124,6 +124,13 @@ export function cardNotes(s) {
   if (s.unsplitSlots) warn(`${s.unsplitSlots} costed ${hh(s.unsplitSlots)} without Octopus’s House/EV split yet: the split rows add up to less than the energy.`);
   if (s.split) muted('Octopus can revise its House/EV split for some days after it first appears.');
   if (s.pending) muted(`${s.pending} ${hh(s.pending)} not in from Octopus yet.`);
+  if (s.agileSlots) {
+    const d = (a, b) => Math.abs(a - b) >= 0.005;
+    const moved = d(s.billKwh, s.kwh) || d(s.billExportKwh, s.exportKwh)
+      ? ` (the meter read ${s.kwh.toFixed(2)} kWh${s.exportKwh ? ` imported, ${s.exportKwh.toFixed(2)} kWh exported` : ''})` : '';
+    muted(`Agile: as on Octopus’s statement, each half-hour is priced at its kWh rounded to 0.01${moved}.`
+      + ' The heatmap and day charts show the meter’s kWh.');
+  }
   return out;
 }
 
@@ -152,6 +159,9 @@ export class BillsView {
     this.billOpts = {
       standingRate: (k) => Number(data.tariffOn(k)?.preVatStandingCharge) || null,
       offWindowOn: (k) => offWindowOf(data.tariffOn(k)),
+      // an Agile statement prices each half-hour at its kWh to 0.01, half to even (design §5.3)
+      agileImport: agileOn(data.info.import?.agreements),
+      agileExport: agileOn(data.info.export?.agreements),
     };
     this.onBillingDay = onBillingDay;
     this.mode = data.info.billing ? 'bill' : 'month';
@@ -426,7 +436,7 @@ export class BillsView {
         }
       }
     }
-    row('Energy total', kwh(s.kwh), pounds(b.energyExc), 'total');
+    row('Energy total', kwh(s.billKwh), pounds(b.energyExc), 'total');
     const soFar = s.finished ? '' : ' so far';
     if (b.standing.length) {
       for (const g of b.standing) row('Standing charge', `${g.days} day${g.days === 1 ? '' : 's'} @ ${g.rateExc.toFixed(2)}p${soFar}`, pounds(g.exc));
@@ -435,7 +445,7 @@ export class BillsView {
     }
     row(b.vatLabel, '', pounds(b.vat));
     row('Total incl. VAT', '', pounds(b.incTotal), 'total');
-    if (s.exportKwh) row('Export', kwh(s.exportKwh), `−${pounds(b.exportCredit)}`);
+    if (s.exportKwh) row('Export', kwh(s.billExportKwh), `−${pounds(b.exportCredit)}`);
     if (s.exportKwh) row('Bill after export', '', pounds(b.total), 'total');
     card.append(t);
 

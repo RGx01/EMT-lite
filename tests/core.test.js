@@ -1096,3 +1096,85 @@ describe('refreshing a month', () => {
     expect((await cache.get(monthKey(info, nov))).imp[0].costExc).toBe(12.5);
   });
 });
+
+import { statementKwh } from '../src/bill.js';
+import { agileOn, isAgile } from '../src/data.js';
+
+// EMT's tests/test_agile_statement_kwh.py, ported (26 Nov 2026): an Agile statement prices each
+// half-hour at its rate × its kWh to 0.01, half to even. The same made-up half-hours, so the
+// figures are EMT's.
+describe('an Agile statement’s kWh', () => {
+  const AGILE_IN = { productCode: 'AGILE-24-10-01', tariffCode: 'E-1R-AGILE-24-10-01-A' };
+  const AGILE_OUT = { productCode: 'AGILE-OUTGOING-19-05-13', tariffCode: 'E-1R-AGILE-OUTGOING-19-05-13-A' };
+  const INTELLI = { productCode: 'INTELLI-VAR-22-10-14', tariffCode: 'E-1R-INTELLI-VAR-22-10-14-A' };
+  const FIX_OUT = { productCode: 'OUTGOING-FIX-12M-19-05-13', tariffCode: 'E-1R-OUTGOING-FIX-12M-19-05-13-A' };
+  const ag = (tariff, validFrom, validTo = null) => ({ tariff, validFrom, validTo });
+  // 5 Sep 2026 (BST), five half-hours from 12:00 local: [imp kWh, imp p/kWh ex VAT, exp kWh, exp p/kWh]
+  const HH = [[0.004, 30, 0.005, 15], [0.005, 30, 0.015, 15], [0.015, 10, 0.0125, 15], [1.945, 20, 2.0, 15], [0.333, -5, 0, 15]];
+  const t0 = Date.parse('2026-09-05T11:00:00Z');
+  const ivs = (dir) => HH.map(([k, r, ek, er], i) => (dir === 'imp'
+    ? { start: t0 + i * HALF_HOUR, kwh: k, costExc: k * r, standingExc: null, offPeak: null, split: null }
+    : { start: t0 + i * HALF_HOUR, kwh: ek, costExc: -ek * er, standingExc: null, offPeak: null, split: null }));
+  const cover = { from: '2026-09-05', last: t0 + 4 * HALF_HOUR, now: Date.parse('2026-09-06T12:00:00Z') };
+  const card = (imp, exp) => summarise({ start: '2026-09-05', end: '2026-09-06' }, byDay(ivs('imp')), cover,
+    byDay(ivs('exp')), cover, () => 0.05, { agileImport: agileOn(imp), agileExport: agileOn(exp) });
+  const AGILE = [[ag(AGILE_IN, '2026-02-15T00:00:00Z')], [ag(AGILE_OUT, '2026-01-01T00:00:00Z')]];
+
+  it('rounds to 0.01 kWh, half to even', () => {
+    expect([0.004, 0.005, 0.0050000000001, 0.006, 0.015, 0.025, 1.945, 0.0125, 0].map(statementKwh))
+      .toEqual([0, 0, 0, 0.01, 0.02, 0.02, 1.94, 0.01, 0]);
+  });
+  it('takes Agile and Agile Outgoing only, and only while their agreement is in force', () => {
+    expect([AGILE_IN, AGILE_OUT, INTELLI, FIX_OUT].map(isAgile)).toEqual([true, true, false, false]);
+    expect(agileOn([ag(FIX_OUT, '2026-01-01T00:00:00Z')])).toBe(null);
+    const on = agileOn([ag(INTELLI, '2026-01-01T00:00:00Z', '2026-03-01T00:00:00Z'), ag(AGILE_IN, '2026-03-01T00:00:00Z')]);
+    expect([on(Date.parse('2026-02-28T23:30:00Z')), on(Date.parse('2026-03-01T00:00:00Z'))]).toEqual([false, true]);
+  });
+  it('prices Agile import at the statement’s kWh', () => {
+    const s = card(...AGILE);
+    expect(s.billKwh).toBeCloseTo(2.29, 9);          // 0 + 0 + 0.02 + 1.94 + 0.33; the meter 2.302
+    expect(s.kwh).toBeCloseTo(2.302, 9);             // what the heatmap and charts show
+    expect(s.energyExc).toBeCloseTo(37.35, 9);       // 0.02 × 10 + 1.94 × 20 + 0.33 × −5 (the meter's 37.655)
+    expect(s.bill.energyExc).toBeCloseTo(37, 9);
+  });
+  it('credits Agile Outgoing export at the statement’s kWh', () => {
+    const s = card(...AGILE);
+    expect(s.billExportKwh).toBeCloseTo(2.03, 9);    // 0 + 0.02 + 0.01 + 2.00; the meter 2.0325
+    expect(s.exportCredit).toBeCloseTo(30.45, 9);
+    expect(s.agileSlots).toBe(10);                   // five import, five export (a 0 kWh reading is still on Agile)
+  });
+  it('GUARD: Intelligent is summed as Octopus costed it', () => {
+    const s = card([ag(INTELLI, '2026-02-15T00:00:00Z')], []);
+    expect(s.billKwh).toBeCloseTo(2.302, 9);
+    expect(s.energyExc).toBeCloseTo(37.655, 9);
+    expect(s.billExportKwh).toBeCloseTo(2.0325, 9);
+    expect(s.agileSlots).toBe(0);
+  });
+  it('rounds only the half-hours on Agile', () => {
+    // Agile from 12:30 local: the first half-hour keeps its 0.004
+    const s = card([ag(INTELLI, '2026-02-15T00:00:00Z', '2026-09-05T11:30:00Z'), ag(AGILE_IN, '2026-09-05T11:30:00Z')], []);
+    expect(s.billKwh).toBeCloseTo(2.294, 9);
+  });
+  it('rounds each of a clocks-back half-hour’s two readings', () => {
+    // 25 Oct 2026: 01:00 BST (00:00Z) and 01:00 GMT (01:00Z) share slot 2
+    const two = [0, 1].map((h) => ({ start: Date.parse(`2026-10-25T0${h}:00:00Z`), kwh: 0.006, costExc: 0.006 * 20, standingExc: null, offPeak: null, split: null }));
+    const c = { from: '2026-10-25', last: two[1].start, now: Date.parse('2026-10-26T12:00:00Z') };
+    const s = summarise({ start: '2026-10-25', end: '2026-10-26' }, byDay(two), c, null, null, () => 0,
+      { agileImport: agileOn(AGILE[0]) });
+    expect(s.billKwh).toBeCloseTo(0.02, 9);          // 0.01 + 0.01; the slot's 0.012 would round to 0.01
+    expect(s.energyExc).toBeCloseTo(0.4, 9);
+  });
+});
+
+describe('the card’s Agile note', () => {
+  const base = { missing: 0, exportMissing: 0, estimatedSlots: 0, uncostedSlots: 0, unsplitSlots: 0, split: null, pending: 0 };
+  it('says the statement’s rounding applies, and what the meter read when it moved the kWh', () => {
+    const [n] = cardNotes({ ...base, agileSlots: 9, kwh: 2.302, billKwh: 2.29, exportKwh: 2.0325, billExportKwh: 2.03 });
+    expect(n.text).toMatch(/^Agile: .*rounded to 0\.01 \(the meter read 2\.30 kWh imported, 2\.03 kWh exported\)/);
+    const [m] = cardNotes({ ...base, agileSlots: 2, kwh: 1.5, billKwh: 1.5, exportKwh: 0, billExportKwh: 0 });
+    expect(m.text).not.toMatch(/meter read/);
+  });
+  it('GUARD: says nothing off Agile', () => {
+    expect(cardNotes({ ...base, agileSlots: 0 }).length).toBe(0);
+  });
+});

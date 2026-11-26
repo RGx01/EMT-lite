@@ -45,6 +45,33 @@ export function slotState(days, dayKey, slot, cover) {
   return 'missing';
 }
 
+/** A half-hour's kWh as an Agile statement prints and prices it: to 0.01 kWh, half to even
+ *  (0.005 → 0.00, 0.015 → 0.02, 1.945 → 1.94). EMT's statement_kwh (26 Nov 2026). */
+export function statementKwh(kwh) {
+  const x = Math.round((Number(kwh) || 0) * 1e6) / 1e6;   // a sum's 0.0050000000001 is 0.005
+  const h = Math.round(x * 1e6) / 1e4;                      // hundredths, exact to the meter's 0.001
+  const f = Math.floor(h);
+  const n = Math.abs(h - f - 0.5) < 1e-6 ? (f % 2 === 0 ? f : f + 1) : Math.round(h);
+  return n / 100 + 0;                                       // + 0: never −0
+}
+
+/** A half-hour on an Agile statement: each reading at its rate × its kWh to 0.01 (statementKwh).
+ *  `costExc` is the half-hour's whole cost, Octopus's or estimated; a reading without its own cost
+ *  takes its share of it. `onAgile(ms)` says which readings are on Agile; others keep theirs.
+ *  Returns { kwh, exc }. */
+export function statementOf(iv, costExc, onAgile) {
+  const parts = iv.parts || [{ start: iv.start, kwh: iv.kwh, costExc: iv.costExc }];
+  let kwh = 0, exc = 0;
+  for (const p of parts) {
+    const c = p.costExc ?? (iv.kwh > 0 ? costExc * p.kwh / iv.kwh : 0);
+    if (!onAgile(p.start) || !(p.kwh > 0)) { kwh += p.kwh; exc += c; continue; }
+    const k2 = statementKwh(p.kwh);
+    kwh += k2;
+    exc += c * k2 / p.kwh;          // Octopus's cost is the rate × the meter's kWh
+  }
+  return { kwh, exc };
+}
+
 function emptyBand() { return { kwh: 0, cost: 0, exc: 0 }; }
 
 function median(xs) {
@@ -62,6 +89,11 @@ function halfHoursOf(k) {
  * `impCover` / `expCover` as slotState's `cover`. `opts`:
  *   standingRate(dayKey)  the tariff's daily standing charge ex VAT, pence, or null
  *   offWindowOn(dayKey)   the tariff's fixed off-peak window (slot → bool), or null
+ *   agileImport(ms), agileExport(ms)   whether the import / export agreement at that instant is
+ *                         Agile (Agile Outgoing): its statement prices each half-hour at its kWh
+ *                         to 0.01 (statementOf). Null or absent: no Agile.
+ * `kwh` and `exportKwh` stay the meter's; `billKwh` and `billExportKwh` are the statement's, and the
+ * bands, costs and credit follow the statement.
  */
 export function summarise(period, imp, impCover, exp = null, expCover = null, vat = vatRate, opts = {}) {
   const s = {
@@ -70,6 +102,8 @@ export function summarise(period, imp, impCover, exp = null, expCover = null, va
     uncostedKwh: 0, uncostedSlots: 0, missing: 0, pending: 0,
     estimatedKwh: 0, estimatedSlots: 0,  // half-hours Octopus never costed, priced at their band's rate
     exportKwh: 0, exportCredit: 0, exportMissing: 0, net: 0, avgRate: null,
+    billKwh: 0, billExportKwh: 0,    // as the statement prices them: on Agile, each half-hour to 0.01 kWh
+    agileSlots: 0,                   // half-hours priced at the Agile statement's kWh, import and export
     split: null, unsplitSlots: 0,   // Octopus's House/EV split (IOG-SMB), VAT added; costed half-hours without one
     energyExc: 0, standingDays: {},  // ex VAT, unrounded; local day → { exc, vat } of its standing charge
     vatByDay: {},                    // local day → VAT rate in force (for the VAT line's label)
@@ -106,19 +140,25 @@ export function summarise(period, imp, impCover, exp = null, expCover = null, va
         const win = opts.offWindowOn?.(k);
         const b = offPeak ?? rates.bandAt(slot) ?? (win ? win(slot) : null);
         const r = rates.rateFor(k, b);
-        if (r == null) { s.uncostedKwh += iv.kwh; s.uncostedSlots++; continue; }
+        if (r == null) { s.uncostedKwh += iv.kwh; s.uncostedSlots++; s.billKwh += iv.kwh; continue; }
         costExc = iv.kwh * r;
         offPeak = b;
         estimated = true;
         s.estimatedKwh += iv.kwh;
         s.estimatedSlots++;
       }
+      let billKwh = iv.kwh;
+      if (opts.agileImport && (iv.parts || [iv]).some((p) => opts.agileImport(p.start))) {
+        ({ kwh: billKwh, exc: costExc } = statementOf(iv, costExc, opts.agileImport));
+        s.agileSlots++;
+      }
+      s.billKwh += billKwh;
       const cost = costExc * v;
       s.energy += cost;
       s.energyExc += costExc;
-      costedKwh += iv.kwh;
+      costedKwh += billKwh;
       const band = offPeak === true ? s.offPeak : offPeak === false ? s.peak : s.unbanded;
-      band.kwh += iv.kwh;
+      band.kwh += billKwh;
       band.cost += cost;
       band.exc += costExc;
       if (estimated) continue;            // no split to give it: Octopus has not costed it
@@ -142,7 +182,16 @@ export function summarise(period, imp, impCover, exp = null, expCover = null, va
         if (st !== 'present' && st !== 'partial') continue;
         const iv = eday.get(slot);
         s.exportKwh += iv.kwh;
-        if (iv.costExc != null) s.exportCredit += Math.abs(iv.costExc);
+        let k2 = iv.kwh, credit = iv.costExc != null ? Math.abs(iv.costExc) : null;
+        if (opts.agileExport && credit != null && (iv.parts || [iv]).some((p) => opts.agileExport(p.start))) {
+          // a credit, so each reading's cost is taken as a positive amount
+          const parts = (iv.parts || [{ start: iv.start, kwh: iv.kwh, costExc: iv.costExc }])
+            .map((q) => ({ ...q, costExc: q.costExc == null ? null : Math.abs(q.costExc) }));
+          ({ kwh: k2, exc: credit } = statementOf({ ...iv, parts }, credit, opts.agileExport));
+          s.agileSlots++;
+        }
+        s.billExportKwh += k2;
+        if (credit != null) s.exportCredit += credit;
       }
     }
   }
