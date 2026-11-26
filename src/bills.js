@@ -61,6 +61,23 @@ export function vatNote(vat) {
 
 export const ISSUES_URL = 'https://github.com/RGx01/EMT-lite/issues/new/choose';
 
+const hh = (n) => `half-hour${n === 1 ? '' : 's'}`;
+
+/** The bill card's notes on its data, as { cls: 'warn' | 'muted', text }: what is missing,
+ *  estimated or not in yet. The VAT note and the caveat follow them. */
+export function cardNotes(s) {
+  const out = [];
+  const warn = (text) => out.push({ cls: 'warn', text }), muted = (text) => out.push({ cls: 'muted', text });
+  if (s.missing) warn(`${s.missing} ${hh(s.missing)} with no reading from Octopus: this bill will look short. See the heatmap.`);
+  if (s.exportMissing) warn(`${s.exportMissing} export ${hh(s.exportMissing)} with no reading from Octopus: the export credit will look short. See the heatmap.`);
+  if (s.estimatedSlots) warn(`${s.estimatedKwh.toFixed(2)} kWh in ${s.estimatedSlots} ${hh(s.estimatedSlots)} Octopus has not costed: estimated at that band’s rate.`);
+  if (s.uncostedSlots) warn(`${s.uncostedKwh.toFixed(2)} kWh in ${s.uncostedSlots} ${hh(s.uncostedSlots)} not costed by Octopus yet.`);
+  if (s.unsplitSlots) warn(`${s.unsplitSlots} costed ${hh(s.unsplitSlots)} without Octopus’s House/EV split yet: the split rows add up to less than the energy.`);
+  if (s.split) muted('Octopus can revise its House/EV split for some days after it first appears.');
+  if (s.pending) muted(`${s.pending} ${hh(s.pending)} not in from Octopus yet.`);
+  return out;
+}
+
 /** The bill card's last note: these figures are worked out, not Octopus's bill. */
 function caveat() {
   const li = el('li', 'caveat', 'Worked out from Octopus’s half-hourly data: not your bill, and it may contain mistakes. Your Octopus statement is the one that counts. Something wrong? ');
@@ -82,6 +99,11 @@ export class BillsView {
     this.root = root;
     this.data = data;
     this.vat = vatFor(data.info.vat);   // dayKey → VAT rate: the calendar, or a business account's rate
+    // what the bill takes from the tariff: its daily standing charge, and its fixed off-peak window
+    this.billOpts = {
+      standingRate: (k) => Number(data.tariffOn(k)?.preVatStandingCharge) || null,
+      offWindowOn: (k) => offWindowOf(data.tariffOn(k)),
+    };
     this.onBillingDay = onBillingDay;
     this.mode = data.info.billing ? 'bill' : 'month';
     this.sel = null;
@@ -188,7 +210,7 @@ export class BillsView {
     if (this.mode === 'bill' && this.prompt) where.after(this.billingDayPrompt());
 
     const d = this.data;
-    const sum = (q) => q && summarise(q, d.impDays, d.impCover, d.expDays, d.expCover, this.vat);
+    const sum = (q) => q && summarise(q, d.impDays, d.impCover, d.expDays, d.expCover, this.vat, this.billOpts);
     const s = sum(p), sp = sum(previousOf(list, p)), sy = sum(lastYearOf(list, p));
     const card = this.card(p, s, sp, sy);
     this.root.append(card);
@@ -264,7 +286,7 @@ export class BillsView {
     const wrap = el('div', 'day-data-wrap');
     wrap.append(t);
     // the day header's £ is energy and standing charge together: say so under the table
-    const sd = summarise({ start: k, end: addDays(k, 1) }, this.data.impDays, this.data.impCover, this.data.expDays, this.data.expCover, this.vat);
+    const sd = summarise({ start: k, end: addDays(k, 1) }, this.data.impDays, this.data.impCover, this.data.expDays, this.data.expCover, this.vat, this.billOpts);
     const b = sd.bill;
     wrap.append(el('p', 'day-data-note', `Standing charge ${pounds(b.standingExc)} exc VAT · ${b.vatLabel} ${pounds(b.vat)}`
       + ` · day total incl. VAT ${pounds(b.incTotal)}${b.exportCredit ? ` · after export ${pounds(b.total)}` : ''}`
@@ -369,11 +391,7 @@ export class BillsView {
     card.append(t);
 
     const notes = el('ul', 'bill-notes');
-    if (s.missing) notes.append(el('li', 'warn', `${s.missing} half-hour${s.missing === 1 ? '' : 's'} with no reading from Octopus: this bill will look short. See the heatmap.`));
-    if (s.uncostedSlots) notes.append(el('li', 'warn', `${s.uncostedKwh.toFixed(2)} kWh in ${s.uncostedSlots} half-hour${s.uncostedSlots === 1 ? '' : 's'} not costed by Octopus yet.`));
-    if (s.unsplitSlots) notes.append(el('li', 'warn', `${s.unsplitSlots} costed half-hour${s.unsplitSlots === 1 ? '' : 's'} without Octopus’s House/EV split yet: the split rows add up to less than the energy.`));
-    if (s.split) notes.append(el('li', 'muted', 'Octopus can revise its House/EV split for some days after it first appears.'));
-    if (s.pending) notes.append(el('li', 'muted', `${s.pending} half-hour${s.pending === 1 ? '' : 's'} not in from Octopus yet.`));
+    for (const n of cardNotes(s)) notes.append(el('li', n.cls, n.text));
     notes.append(el('li', 'muted', vatNote(this.data.info.vat)));
     notes.append(caveat());
     card.append(notes);
@@ -397,7 +415,7 @@ export class BillsView {
       box.dataset.day = k;
       const { m, d } = parseKey(k);
       const s = summarise({ start: k, end: addDays(k, 1) },
-        this.data.impDays, this.data.impCover, this.data.expDays, this.data.expCover, this.vat);
+        this.data.impDays, this.data.impCover, this.data.expDays, this.data.expCover, this.vat, this.billOpts);
       const head = el('div', 'day-head');
       head.append(
         el('strong', null, `${DOW[new Date(`${k}T12:00:00Z`).getUTCDay()]} ${d} ${MON[m - 1]}`),
