@@ -231,6 +231,15 @@ What EMT learned the hard way, which EMT-Lite starts with:
   With nothing to go by, the half-hour stays uncosted.
 - **Missing export** is a warning on the card, as missing import is: the export credit will look
   short.
+- **The day charts say when a day is not final** (26 Nov 2026):
+  - A half-hour with kWh but no cost is drawn as its own hatched grey bar, never as peak. Within 7
+    days (`ARRIVING_DAYS`) the line above the chart says the costs are still arriving; after that, that
+    Octopus has not costed them and the bill estimates them.
+  - Otherwise, today and the 3 days before it (`PROVISIONAL_DAYS`) are marked provisional. Octopus's
+    first price for a day can be wrong: on one real account its first answer for a night put the whole
+    night on the House with no EV, and priced dispatched charging at peak. A day later it had split
+    out the EV and re-banded the dispatches to off-peak, and the day cost about a third. The figures
+    give no sign that a first answer is wrong, so the note goes by age alone.
 - **Checked against EMT** (26 Nov 2026) on two years of one real account's bills.
   - **Recent bills:** they agree to the penny or within 1p of rounding.
   - **Larger gaps:** where Octopus lacked export readings (EMT had them from the meter), or never
@@ -323,6 +332,13 @@ keyed by account, meters and month, with when it was fetched.
   remembered sign-in that has expired. A sign-in **error** keeps them: a network blip must not
   throw away what the user asked to be remembered (before 25 Nov 2026 it did, token included).
 - If IndexedDB is unavailable (a private window), the page asks Octopus as without the cache.
+
+### 6.1 Coming back to the page
+
+The page asks Octopus when it loads; it does not poll. When the tab is shown again an hour or more
+after the last answer (`REFRESH_AFTER_MS`), it asks again for the months holding today and the
+provisional days (one month, or two early in a month), and puts each answer in place of the old one.
+A load already running is left alone. A reload does the same at once.
 
 Measured on the first real account: the first visit as before (about 90 s, 216 requests); the next
 **10 s and 20 requests**, 11 months from the device and 2 from Octopus. Sign out checked the same

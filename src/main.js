@@ -1,5 +1,5 @@
 import { Octopus } from './octopus.js';
-import { AccountData, describeAccount, monthsToLoad, DEFAULT_MONTHS, billingFromDay, chooseBilling } from './data.js';
+import { AccountData, describeAccount, monthsToLoad, provisionalMonths, DEFAULT_MONTHS, billingFromDay, chooseBilling } from './data.js';
 import { DemoOctopus, demoAccountInfo, DEMO_NUMBER } from './demo.js';
 import { deviceCache, deleteDeviceCache } from './cache.js';
 import { BillsView } from './bills.js';
@@ -152,7 +152,35 @@ async function start(o, info) {
 // account's rate limit is spent no faster; they overlap Octopus's seconds-long answers.
 const MONTHS_AT_ONCE = 3;
 
+// When the data was last asked of Octopus, and whether a load is running: coming back to the page
+// an hour or more later asks again for the months holding the provisional days (design §6.1).
+const REFRESH_AFTER_MS = 3600000;
+let fetchedAt = 0, loading = false;
+
 async function loadMonths(months) {
+  loading = true;
+  try { await loadMonthsNow(months); } finally { loading = false; fetchedAt = Date.now(); }
+}
+
+async function refreshRecent() {
+  const mine = data;
+  if (!mine || loading || Date.now() - fetchedAt < REFRESH_AFTER_MS) return;
+  const months = provisionalMonths(mine.loaded);
+  if (!months.length) return;
+  loading = true;
+  status('Updating the last few days from Octopus…');
+  try {
+    for (const m of months) { await mine.refreshMonth(m); if (data !== mine) return; }
+    redraw();
+    status('Up to date.');
+  } catch (e) {
+    if (data === mine) status(`Could not update: ${e.message || e}`);
+  } finally { loading = false; fetchedAt = Date.now(); }
+}
+
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') refreshRecent(); });
+
+async function loadMonthsNow(months) {
   $('more').hidden = true;
   const todo = months.filter((m) => !data.loaded.includes(m.start));
   let next = 0, done = 0, fromDevice = 0, failed = null;

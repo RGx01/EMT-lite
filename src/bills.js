@@ -8,8 +8,11 @@ import {
 import { billPeriods, calendarPeriods, previousOf, lastYearOf, periodLabel } from './periods.js';
 import { summarise, pounds, penny } from './bill.js';
 import { vatFor } from './vat.js';
-import { rateLine, solid, sideRateLine, exportRateLine, offWindowOf } from './rates.js';
+import { rateLine, solid, sideRateLine, exportRateLine, offWindowOf, awaitingCost } from './rates.js';
 import { daysBetween, slotsOfDay, todayKey, parseKey, addDays } from './time.js';
+import { PROVISIONAL_DAYS } from './data.js';
+
+export { PROVISIONAL_DAYS };
 
 Chart.register(BarController, BarElement, LineController, LineElement, PointElement, LinearScale, CategoryScale, Tooltip, Legend);
 
@@ -40,6 +43,52 @@ function keyMark(ds) {
   }
   keyMarks.set(k, c);
   return c;
+}
+
+// A half-hour whose cost has not arrived: grey stripes, as the heatmap hatches what is missing.
+const hatches = new Map();
+function hatch(dark) {
+  if (hatches.has(dark)) return hatches.get(dark);
+  const c = document.createElement('canvas');
+  c.width = 6; c.height = 6;
+  const x = c.getContext('2d');
+  x.fillStyle = dark ? 'rgba(153,153,153,0.25)' : 'rgba(153,153,153,0.2)';
+  x.fillRect(0, 0, 6, 6);
+  x.strokeStyle = PALETTE.unsplit; x.lineWidth = 1.5;
+  x.beginPath(); x.moveTo(-1, 7); x.lineTo(7, -1); x.moveTo(-1, 1); x.lineTo(1, -1); x.moveTo(5, 7); x.lineTo(7, 5); x.stroke();
+  const pat = x.createPattern(c, 'repeat');
+  hatches.set(dark, pat);
+  return pat;
+}
+
+/** How long after a day Octopus's costs for it may still be arriving: after that, not coming. */
+export const ARRIVING_DAYS = 7;
+
+/** A day with half-hours Octopus has the kWh for but not the cost: the label for their bars, and
+ *  the line above the chart. Within ARRIVING_DAYS the costs are still arriving; after that,
+ *  Octopus has not costed them and the bill estimates them. */
+export function awaitingText(dayKey, slots, kwh, today = todayKey()) {
+  if (!slots) return null;
+  const hh = `${slots} half-hour${slots === 1 ? '' : 's'} (${kwh.toFixed(2)} kWh)`;
+  if (dayKey >= addDays(today, -ARRIVING_DAYS)) {
+    return { label: 'Costs still arriving', head: 'costs still arriving',
+      note: `Costs still arriving: Octopus has the kWh for ${hh} but not the cost yet. They are hatched,`
+        + ' and the chart fills in when the costs come, usually within a day or two.' };
+  }
+  return { label: 'Not costed by Octopus', head: `${slots} not costed`,
+    note: `Octopus has not costed ${hh}. They are hatched, and the bill estimates them at their band’s rate.` };
+}
+
+/** The line above a day's chart: costs still arriving (or never costed), else provisional for
+ *  today and the PROVISIONAL_DAYS before it, else none. */
+export function dayNote(dayKey, slots, kwh, today = todayKey()) {
+  const aw = awaitingText(dayKey, slots, kwh, today);
+  if (aw) return { head: aw.head, text: aw.note };
+  if (dayKey > today || dayKey < addDays(today, -PROVISIONAL_DAYS)) return null;
+  return { head: 'provisional', text: dayKey === today
+    ? 'Today so far: Octopus usually sends today’s readings tomorrow, and may re-price them after.'
+    : 'Provisional: Octopus may still re-price this day. Smart-charge dispatches and the House / EV split'
+      + ' often land a day or two after the first costs.' };
 }
 
 const MODES = [['bill', 'Bill'], ['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year']];
@@ -416,11 +465,15 @@ export class BillsView {
       const { m, d } = parseKey(k);
       const s = summarise({ start: k, end: addDays(k, 1) },
         this.data.impDays, this.data.impCover, this.data.expDays, this.data.expCover, this.vat, this.billOpts);
+      const iday = this.data.impDays.get(k);
+      const late = [...awaitingCost(iday, slotsOfDay(k))];
+      const lateKwh = late.reduce((a, sl) => a + iday.get(sl).kwh, 0);
+      const dn = dayNote(k, late.length, lateKwh);
       const head = el('div', 'day-head');
       head.append(
         el('strong', null, `${DOW[new Date(`${k}T12:00:00Z`).getUTCDay()]} ${d} ${MON[m - 1]}`),
         el('span', 'muted', ` ${s.kwh.toFixed(2)} kWh · ${pounds(s.bill.incTotal)}${s.missing ? ` · ${s.missing} missing` : ''}`
-          + `${s.uncostedSlots ? ` · ${s.uncostedSlots} not costed yet` : ''}`),
+          + `${dn ? ` · ${dn.head}` : ''}`),
       );
       const holder = el('div', 'day-chart');
       holder.append(el('canvas'));
@@ -432,7 +485,9 @@ export class BillsView {
       btn.title = 'Show or hide this day’s half-hours';
       btn.addEventListener('click', () => this.toggleTable(box));
       bar.append(btn);
-      box.append(head, holder, tbl, bar);
+      box.append(head);
+      if (dn) box.append(el('p', 'day-note', dn.text));
+      box.append(holder, tbl, bar);
       if (this.showData) this.toggleTable(box, true);
       wrap.append(box);
       this.observer.observe(box);
@@ -446,7 +501,8 @@ export class BillsView {
     const eday = this.data.expDays?.get(k);
     const dark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
     const grid = dark ? '#2a2d3a' : '#e5e7eb', text = dark ? '#c9ccd6' : '#444';
-    const iv = (s) => day?.get(s);
+    const late = awaitingCost(day, slots);
+    const iv = (s) => (late.has(s) ? null : day?.get(s));   // a costed half-hour, for the banded bars
     const bar = (label, color, value) => ({ type: 'bar', label, yAxisID: 'kwh', order: 2, stack: 'kwh',
       backgroundColor: color, data: slots.map(value) });
     const line = (label, color, rates) => ({ type: 'line', label, yAxisID: 'rate', order: 1, _rate: true,
@@ -481,6 +537,9 @@ export class BillsView {
         bar('Import peak', PALETTE.housePeak, (s) => (iv(s) && iv(s).offPeak !== true ? iv(s).kwh : null)),
         line('Rate p/kWh', text, solid(rateLine(k, day, slots, this.data.publishedFor(k), this.vat, offWindowOf(this.data.tariffOn(k))), slots)),
       );
+    }
+    if (late.size) {
+      datasets.push(bar(awaitingText(k, late.size, 0).label, hatch(dark), (s) => (late.has(s) ? day.get(s).kwh : null)));
     }
     if (eday) {
       datasets.push({ ...bar('Export', PALETTE.export, (s) => (eday.get(s) ? -eday.get(s).kwh : null)), stack: 'kwh' });

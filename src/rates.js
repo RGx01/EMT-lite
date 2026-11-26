@@ -53,6 +53,16 @@ export function rateLine(dayKey, day, slots, published = null, vat = vatRate, of
   return out;
 }
 
+/** The half-hours of a day Octopus has the kWh for but not the cost yet: costs still arriving. */
+export function awaitingCost(day, slots) {
+  const out = new Set();
+  for (const s of slots) {
+    const iv = day?.get(s);
+    if (iv && iv.costExc == null && iv.kwh > MIN_KWH) out.add(s);
+  }
+  return out;
+}
+
 /** Fill a rate map's gaps so the line is continuous: each gap takes the rate before it, and a
  *  leading gap the first rate after it. A day with no rate at all stays empty. */
 export function solid(rates, slots) {
