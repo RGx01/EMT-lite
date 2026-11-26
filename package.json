@@ -1,7 +1,7 @@
 {
   "name": "emt-lite",
   "private": true,
-  "version": "0.1.0",
+  "version": "2026.11.5",
   "type": "module",
   "scripts": {
     "dev": "vite",
@@ -11,7 +11,8 @@
     "deploy": "sh scripts/deploy.sh main",
     "test:e2e": "playwright test",
     "check:kraken": "node scripts/check-kraken.mjs",
-    "deploy:dev": "sh scripts/deploy.sh dev"
+    "deploy:dev": "sh scripts/deploy.sh dev",
+    "release": "sh scripts/release.sh"
   },
   "license": "SEE LICENSE IN LICENSE",
   "dependencies": {

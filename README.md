@@ -4,7 +4,8 @@ Octopus Energy bills and a missing-data heatmap, drawn in the browser from your 
 goes from your browser to `api.octopus.energy` and nowhere else: the page is static files, and its
 Content-Security-Policy lets it connect only to Octopus.
 
-The design is [docs/design.md](docs/design.md).
+The design is [docs/design.md](docs/design.md). What changed in each version is
+[CHANGELOG.md](CHANGELOG.md); the version you are on is in the page's footer.
 
 ## Running it
 
@@ -46,7 +47,8 @@ headers (CSP and the rest). After a deploy, check them:
 curl -sI https://emt-lite.pages.dev/ | grep -i content-security-policy
 ```
 
-Branches, checks and what a change must carry: [CONTRIBUTING.md](CONTRIBUTING.md).
+A release is tagged and published, then deployed, by `npm run release` (CONTRIBUTING.md
+"Releasing"). Branches, checks and what a change must carry: [CONTRIBUTING.md](CONTRIBUTING.md).
 
 The project was created as a **classic Pages project** (`wrangler pages project create emt-lite
 --production-branch main --force`). Without `--force`, Wrangler 4.168 converts the repository into a
@@ -67,7 +69,8 @@ exists now, so later commands need no `--force`.
 | `src/demo.js` | the demo account |
 | `public/_headers` | Cloudflare Pages response headers (CSP and the rest) |
 | `tests/`, `e2e/` | Vitest unit tests; the Playwright CSP check |
-| `scripts/` | the Kraken schema check, the deploy script |
+| `scripts/` | the Kraken schema check, the deploy and release scripts, the changelog reader |
+| `CHANGELOG.md` | what changed in each version, for users |
 
 ## Licence
 
