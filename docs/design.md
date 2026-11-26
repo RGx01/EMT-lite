@@ -211,6 +211,32 @@ What EMT learned the hard way, which EMT-Lite starts with:
   (`vat_calendar.py`: 5% up to 30 Sep 2026, 0% from 1 Oct 2026, at local midnight).
   **Do not use `costInclTax`**: Octopus's half-hourly figures carried 5% after the change (v4
   #505).
+- **Standing charge, a daily charge** (26 Nov 2026). Octopus spreads it over the half-hours and
+  rounds each share, so a day's shares can sum to a few hundredths of a penny under the daily rate
+  the statement charges.
+  - A finished day with only some half-hours carrying it, such as half-hours Octopus never costed,
+    is scaled up to the whole day.
+  - A day within rounding of the tariff's daily rate (`preVatStandingCharge` of the agreement in
+    force) is that rate.
+  - A day far from it is a real price change, and keeps the half-hours' sum.
+  - Today is left as it is.
+- **Half-hours Octopus never costed** (26 Nov 2026), even after the day / month / noon-to-noon
+  retries, are **estimated**, and the card says how many kWh. The rate is the day's charged rate for
+  their band, else the bill period's. The band is chosen in this order:
+  1. Octopus's label.
+  2. The band Octopus charged most at that time of day in the period (charging often runs past
+     05:30).
+  3. The tariff's fixed window (Intelligent's 23:30–05:30).
+
+  With nothing to go by, the half-hour stays uncosted.
+- **Missing export** is a warning on the card, as missing import is: the export credit will look
+  short.
+- **Checked against EMT** (26 Nov 2026) on two years of one real account's bills.
+  - **Recent bills:** they agree to the penny or within 1p of rounding.
+  - **Larger gaps:** where Octopus lacked export readings (EMT had them from the meter), or never
+    costed some half-hours.
+  - **Older bills:** a little further apart. Before v5, EMT's kWh came partly from the household's
+    own meter; EMT-Lite uses Octopus's settled data.
 - **Rounding: EMT's Bill Rounding** (built 25 Nov 2026; EMT `energy_charts._bill_method_breakdown`,
   `bill_card.bill_total`). This is how Octopus builds a bill.
   - Every half-hour's ex-VAT cost is summed **unrounded**. Each line of the bill is rounded to the
