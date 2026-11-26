@@ -11,6 +11,8 @@ can be explained.
 
 ## [Unreleased]
 
+## [2026.11.6] — 2026-11-26
+
 - **The version is in the footer,** linking to this changelog. Say which version you are on when you
   report a problem.
 
@@ -76,7 +78,8 @@ The first public version.
 - **A heatmap** of net use by the half-hour, with every half-hour Octopus has no reading for hatched.
 - **EMT:** the header and footer say where to get EMT for Home Assistant.
 
-[Unreleased]: https://github.com/RGx01/EMT-lite/compare/v2026.11.5...dev
+[Unreleased]: https://github.com/RGx01/EMT-lite/compare/v2026.11.6...dev
+[2026.11.6]: https://github.com/RGx01/EMT-lite/releases/tag/v2026.11.6
 [2026.11.5]: https://github.com/RGx01/EMT-lite/releases/tag/v2026.11.5
 [2026.11.4]: https://github.com/RGx01/EMT-lite/releases/tag/v2026.11.4
 [2026.11.3]: https://github.com/RGx01/EMT-lite/releases/tag/v2026.11.3
