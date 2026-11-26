@@ -13,6 +13,9 @@ import { renderHeatmap } from './heatmap.js';
   setTop();
 }
 
+// The footer's version (vite.config.js), linking to CHANGELOG.md.
+document.getElementById('version').textContent = typeof __EMT_LITE_VERSION__ === 'string' ? __EMT_LITE_VERSION__ : '';
+
 // "Remember me" (design §4.4): Octopus's refresh token, the account number and a billing day the
 // user entered. Never the key. Nothing else is written to the browser.
 const STORE = 'emt-lite';

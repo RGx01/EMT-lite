@@ -8,5 +8,6 @@
 
 - [ ] `npm test` passes; a new test fails without the change
 - [ ] docs/design.md updated where it describes what changed
+- [ ] a line in CHANGELOG.md under [Unreleased], or the `no-changelog` label (nothing a user would see)
 - [ ] no real account numbers, MPANs, postcodes, keys or bill figures anywhere
 - [ ] the CSP (`public/_headers`) is unchanged, or the change is explained here and in design §4
