@@ -6,7 +6,7 @@
 // which is how Octopus builds a bill: every half-hour's ex-VAT cost is summed UNROUNDED, and only
 // the bill's lines are rounded to the penny, once each (billMethod below).
 
-import { daysBetween, slotsOfDay, dayKeyOf, slotOf, instantsOf, repeatedSlots, HALF_HOUR } from './time.js';
+import { daysBetween, slotsOfDay, dayKeyOf, slotOf, instantsOf, repeatedSlots, HALF_HOUR, midnight, addDays } from './time.js';
 import { vatRate } from './vat.js';
 
 /**
@@ -47,15 +47,28 @@ export function slotState(days, dayKey, slot, cover) {
 
 function emptyBand() { return { kwh: 0, cost: 0, exc: 0 }; }
 
+function median(xs) {
+  const a = [...xs].sort((p, q) => p - q);
+  return a.length ? a[Math.floor(a.length / 2)] : null;
+}
+
+/** How many half-hours day `k` has: 48, or 46 / 50 when the clocks change. */
+function halfHoursOf(k) {
+  return Math.round((midnight(addDays(k, 1)) - midnight(k)) / HALF_HOUR);
+}
+
 /**
  * Summarise [period.start, period.end). `imp` / `exp` are byDay() maps (exp may be null);
- * `impCover` / `expCover` as slotState's `cover`.
+ * `impCover` / `expCover` as slotState's `cover`. `opts`:
+ *   standingRate(dayKey)  the tariff's daily standing charge ex VAT, pence, or null
+ *   offWindowOn(dayKey)   the tariff's fixed off-peak window (slot → bool), or null
  */
-export function summarise(period, imp, impCover, exp = null, expCover = null, vat = vatRate) {
+export function summarise(period, imp, impCover, exp = null, expCover = null, vat = vatRate, opts = {}) {
   const s = {
     days: 0, finished: dayKeyOf(impCover.now ?? Date.now()) >= period.end, kwh: 0, energy: 0, standing: 0, total: 0,
     offPeak: emptyBand(), peak: emptyBand(), unbanded: emptyBand(),
     uncostedKwh: 0, uncostedSlots: 0, missing: 0, pending: 0,
+    estimatedKwh: 0, estimatedSlots: 0,  // half-hours Octopus never costed, priced at their band's rate
     exportKwh: 0, exportCredit: 0, exportMissing: 0, net: 0, avgRate: null,
     split: null, unsplitSlots: 0,   // Octopus's House/EV split (IOG-SMB), VAT added; costed half-hours without one
     energyExc: 0, standingDays: {},  // ex VAT, unrounded; local day → { exc, vat } of its standing charge
@@ -64,6 +77,7 @@ export function summarise(period, imp, impCover, exp = null, expCover = null, va
   };
   let costedKwh = 0;
   const today = dayKeyOf(impCover.now ?? Date.now());
+  const rates = bandRates(period, imp, today);
   for (const k of daysBetween(period.start, period.end)) {
     if (k > today) break;
     s.days++;
@@ -78,22 +92,36 @@ export function summarise(period, imp, impCover, exp = null, expCover = null, va
       const iv = day.get(slot);
       s.kwh += iv.kwh;
       if (iv.standingExc != null) {
-        s.standing += iv.standingExc * v;
-        const sd = s.standingDays[k] || (s.standingDays[k] = { exc: 0, vat: v - 1 });
+        const sd = s.standingDays[k] || (s.standingDays[k] = { exc: 0, vat: v - 1, n: 0 });
         sd.exc += iv.standingExc;
+        sd.n += iv.starts?.length || 1;
       }
-      if (iv.costExc == null) {
-        if (iv.kwh > 0) { s.uncostedKwh += iv.kwh; s.uncostedSlots++; }
-        continue;
+      let costExc = iv.costExc, offPeak = iv.offPeak, estimated = false;
+      if (costExc == null) {
+        if (!(iv.kwh > 0)) continue;
+        // Octopus never costed it, even after the day / month / noon-to-noon retries: price it at
+        // its band's rate that day (else the period's). The band: Octopus's label; else the band
+        // Octopus charged most at this time of day in the period (charging often runs past 05:30);
+        // else the tariff's fixed window. With nothing to go by, it stays uncosted.
+        const win = opts.offWindowOn?.(k);
+        const b = offPeak ?? rates.bandAt(slot) ?? (win ? win(slot) : null);
+        const r = rates.rateFor(k, b);
+        if (r == null) { s.uncostedKwh += iv.kwh; s.uncostedSlots++; continue; }
+        costExc = iv.kwh * r;
+        offPeak = b;
+        estimated = true;
+        s.estimatedKwh += iv.kwh;
+        s.estimatedSlots++;
       }
-      const cost = iv.costExc * v;
+      const cost = costExc * v;
       s.energy += cost;
-      s.energyExc += iv.costExc;
+      s.energyExc += costExc;
       costedKwh += iv.kwh;
-      const band = iv.offPeak === true ? s.offPeak : iv.offPeak === false ? s.peak : s.unbanded;
+      const band = offPeak === true ? s.offPeak : offPeak === false ? s.peak : s.unbanded;
       band.kwh += iv.kwh;
       band.cost += cost;
-      band.exc += iv.costExc;
+      band.exc += costExc;
+      if (estimated) continue;            // no split to give it: Octopus has not costed it
       if (iv.split) {
         s.split = s.split || {};
         for (const [key, e] of Object.entries(iv.split)) {
@@ -119,11 +147,66 @@ export function summarise(period, imp, impCover, exp = null, expCover = null, va
     }
   }
   if (!s.split) s.unsplitSlots = 0;        // not a split tariff: nothing is waiting for one
+  // The standing charge is a DAILY charge; Octopus spreads it over the half-hours, rounding each
+  // share (1.04p of a 50.05p day). A finished day with only some half-hours carrying it is scaled
+  // to the whole day; a day within rounding of the tariff's daily rate is that rate. A real price
+  // change (far from the tariff's current figure) keeps the half-hours' sum.
+  for (const [k, sd] of Object.entries(s.standingDays)) {
+    const all = halfHoursOf(k);
+    if (k < today && sd.n > 0 && sd.n < all) sd.exc = sd.exc * all / sd.n;
+    const rate = Number(opts.standingRate?.(k));
+    if (k < today && rate > 0 && Math.abs(sd.exc - rate) <= all * 0.005 + 1e-9) sd.exc = rate;
+    s.standing += sd.exc * (1 + sd.vat);
+  }
   s.total = s.energy + s.standing;
   s.net = s.total - s.exportCredit;
   s.avgRate = costedKwh > 0 ? s.energy / costedKwh : null;
   s.bill = billMethod(s);
   return s;
+}
+
+/** The period's charged rates (pence/kWh ex VAT), by day and band, from the half-hours Octopus
+ *  costed: what an uncosted half-hour is estimated at. `rateFor(k, band)`: that day's median for
+ *  the band, else the period's; with no band, the day's (else period's) rate only if it charged
+ *  a single one. */
+function bandRates(period, imp, today) {
+  const days = new Map(), all = { true: [], false: [], any: [] };
+  const atSlot = new Map();             // slot → [off-peak count, peak count], half-hours that drew power
+  for (const k of daysBetween(period.start, period.end)) {
+    if (k > today) break;
+    const d = { true: [], false: [], any: [] };
+    for (const iv of imp.get(k)?.values() || []) {
+      if (iv.costExc == null || !(iv.kwh > 0.0005)) continue;
+      const r = iv.costExc / iv.kwh;
+      d.any.push(r); all.any.push(r);
+      if (iv.offPeak === true || iv.offPeak === false) {
+        d[iv.offPeak].push(r); all[iv.offPeak].push(r);
+        if (iv.kwh > 0.05) {
+          const slot = slotOf(iv.start), c = atSlot.get(slot) || [0, 0];
+          c[iv.offPeak ? 0 : 1]++;
+          atSlot.set(slot, c);
+        }
+      }
+    }
+    days.set(k, d);
+  }
+  const single = (xs) => (xs.length && new Set(xs.map((r) => r.toFixed(2))).size === 1 ? xs[0] : null);
+  return {
+    /** The band Octopus charged most at this time of day (at least 3 half-hours, a clear
+     *  majority), or null. */
+    bandAt(slot) {
+      const [off, peak] = atSlot.get(slot) || [0, 0];
+      if (off + peak < 3) return null;
+      if (off >= 2 * peak) return true;
+      if (peak >= 2 * off) return false;
+      return null;
+    },
+    rateFor(k, band) {
+      const d = days.get(k) || { true: [], false: [], any: [] };
+      if (band === true || band === false) return median(d[band]) ?? median(all[band]);
+      return single(d.any) ?? single(all.any);
+    },
+  };
 }
 
 /** Round pence to a whole penny, half to even, as EMT's Python `round(x, 2)` on pounds does. */

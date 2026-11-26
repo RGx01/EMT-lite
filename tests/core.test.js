@@ -128,8 +128,9 @@ describe('bill', () => {
     const s = summarise({ start: '2026-09-30', end: '2026-10-02' }, imp, cover);
     // 30 Sep: 48 × 10p × 1.05 = 504p; 1 Oct: 47 × 10p × 1.00 = 470p
     expect(s.energy).toBeCloseTo(974);
-    // standing: 48 × 1p × 1.05 + 47 × 1p = 97.4p
-    expect(s.standing).toBeCloseTo(97.4);
+    // standing is a daily charge: 1 Oct's missing reading does not take a share of it away,
+    // so both days are whole: 48 × 1p × 1.05 + 48 × 1p = 98.4p
+    expect(s.standing).toBeCloseTo(98.4);
     expect(s.kwh).toBeCloseTo(47.5);
     expect(s.missing).toBe(1);
     expect(s.offPeak.kwh).toBeCloseTo(8);
@@ -644,7 +645,9 @@ describe('business VAT', () => {
   });
   it('the bill adds a business account’s VAT after 1 Oct 2026, where the domestic calendar adds none', () => {
     const k = '2026-10-10';
-    const days = byDay([{ start: midnight(k), kwh: 2, costExc: 50, standingExc: 40, offPeak: null, split: null }]);
+    // a whole day: 2 kWh in the first half-hour, the 40p standing charge spread over all 48
+    const days = byDay(Array.from({ length: 48 }, (_, s) => ({ start: midnight(k) + s * HALF_HOUR, kwh: s ? 0 : 2,
+      costExc: s ? 0 : 50, standingExc: 40 / 48, offPeak: null, split: null })));
     const cover = { from: '2026-01-01', last: midnight('2026-10-11'), now: midnight('2026-10-12') };
     const period = { start: k, end: addDays(k, 1) };
     const biz = summarise(period, days, cover, null, null, vatFor(accountVat('BUSINESS', [ag(60, 50)])));
@@ -704,10 +707,11 @@ import { billMethod, penny, vatLabel } from '../src/bill.js';
 
 describe('Bill Rounding (EMT’s bill method)', () => {
   const cover = { from: '2026-01-01', last: midnight('2026-10-03'), now: midnight('2026-10-04') };
-  // 3 half-hours a day, each 0.3335p ex VAT, standing 16.0001p ex VAT per half-hour... keep it simple:
-  // a day's energy is 3 × 0.3335 = 1.0005p, which a bill rounds ONCE (1p), not per half-hour (3 × 0p).
-  const ivs = (k) => [0, 1, 2].map((i) => ({ start: midnight(k) + i * HALF_HOUR, kwh: 0.1, costExc: 0.3335,
-    standingExc: i === 0 ? 48.0004 : 0, offPeak: false, split: null }));
+  // A day's energy is 3 half-hours of 0.3335p ex VAT = 1.0005p, which a bill rounds ONCE (1p), not
+  // per half-hour (3 × 0p); the rest of the day draws nothing. The 48.0004p daily standing charge
+  // is spread over all 48 half-hours, as Octopus spreads it.
+  const ivs = (k, daily = 48.0004) => Array.from({ length: 48 }, (_, i) => ({ start: midnight(k) + i * HALF_HOUR,
+    kwh: i < 3 ? 0.1 : 0, costExc: i < 3 ? 0.3335 : 0, standingExc: daily / 48, offPeak: false, split: null }));
 
   it('sums every half-hour unrounded and rounds each line once', () => {
     const imp = byDay([...ivs('2026-09-29'), ...ivs('2026-09-30')]);
@@ -715,7 +719,9 @@ describe('Bill Rounding (EMT’s bill method)', () => {
     const b = s.bill;
     expect(b.energyExc).toBe(2);                      // 6 × 0.3335 = 2.001 → 2p
     expect(b.standingExc).toBe(96);                   // 2 × 48.0004 = 96.0008 → 96p
-    expect(b.standing).toEqual([{ days: 2, rateExc: 48.0004, exc: 96 }]);
+    expect(b.standing).toHaveLength(1);
+    expect(b.standing[0]).toMatchObject({ days: 2, exc: 96 });
+    expect(b.standing[0].rateExc).toBeCloseTo(48.0004, 6);
     expect(b.subtotalExc).toBe(98);
     expect(b.vat).toBe(5);                            // 98.0018 × 5% = 4.90009 → 5p
     expect(b.incTotal).toBe(103);                     // 102.9019 → 103p
@@ -739,7 +745,7 @@ describe('Bill Rounding (EMT’s bill method)', () => {
     expect(vatLabel({ '2026-11-01': 0, '2026-11-02': 0 })).toBe('VAT @ 0%');
   });
   it('a change in the daily standing charge is its own line', () => {
-    const a = ivs('2026-09-28'), b = ivs('2026-09-29').map((iv) => ({ ...iv, standingExc: iv.standingExc ? 50 : 0 }));
+    const a = ivs('2026-09-28'), b = ivs('2026-09-29', 50);
     const s = summarise({ start: '2026-09-28', end: '2026-09-30' }, byDay([...a, ...b]), cover);
     expect(s.bill.standing.map((g) => [g.days, g.exc])).toEqual([[1, 48], [1, 50]]);
   });
@@ -910,5 +916,109 @@ describe('the gas heatmap', () => {
   it('the day bar speaks of gas in its unit', () => {
     const d = { net: 12.5, imp: 12.5, exp: 0, missImp: 2, missExp: 0 };
     expect(dayBarText('2026-11-10', d, false, 'm³', 'gas')).toBe('Tue 10 Nov 2026 · 12.50 m³ · 2 gas half-hours missing');
+  });
+});
+
+import { cardNotes } from '../src/bills.js';
+import { inIogWindow as iogWin } from '../src/rates.js';
+
+describe('the standing charge: the tariff’s daily rate', () => {
+  const k = '2026-08-10', t = (s) => midnight(k) + s * HALF_HOUR;
+  const cover = { from: '2026-01-01', last: midnight('2026-08-12'), now: midnight('2026-08-12') };
+  const period = { start: k, end: addDays(k, 1) };
+  // Octopus attaches a rounded share of the daily charge to each half-hour (made-up figures): 1.04p, so 49.92p a day
+  const day = (n, per) => byDay(Array.from({ length: n }, (_, s) => ({ start: t(s), kwh: 0.1, costExc: 0.5, standingExc: per, offPeak: null, split: null })));
+
+  it('a day whose half-hours sum to within rounding of the tariff’s rate is that rate', () => {
+    const s = summarise(period, day(48, 1.04), cover, null, null, () => 0, { standingRate: () => 50.05 });
+    expect(s.standingDays[k].exc).toBeCloseTo(50.05);
+    expect(s.bill.standing).toEqual([{ days: 1, rateExc: 50.05, exc: 50 }]);
+  });
+  it('(guard) a real price change is kept: half-hours far from the tariff’s current rate', () => {
+    const s = summarise(period, day(48, 0.95), cover, null, null, () => 0, { standingRate: () => 50.05 });
+    expect(s.standingDays[k].exc).toBeCloseTo(45.6);
+  });
+  it('a finished day with standing on only some half-hours is scaled to the whole day', () => {
+    const s = summarise(period, day(24, 1.04), cover, null, null, () => 0, {});
+    expect(s.standingDays[k].exc).toBeCloseTo(49.92);
+    const t2 = summarise(period, day(24, 1.04), cover, null, null, () => 0, { standingRate: () => 50.05 });
+    expect(t2.standingDays[k].exc).toBeCloseTo(50.05);
+  });
+  it('(guard) today is not scaled: its half-hours have not all happened', () => {
+    const now = { ...cover, now: midnight(k) + 24 * HALF_HOUR + 60000, last: midnight(k) + 23 * HALF_HOUR };
+    const s = summarise(period, day(24, 1.04), now, null, null, () => 0, { standingRate: () => 50.05 });
+    expect(s.standingDays[k].exc).toBeCloseTo(24.96);
+  });
+  it('the inc-VAT standing charge follows the corrected days', () => {
+    const s = summarise(period, day(48, 1.04), cover, null, null, () => 0.05, { standingRate: () => 50.05 });
+    expect(s.standing).toBeCloseTo(50.05 * 1.05);
+  });
+});
+
+describe('half-hours Octopus never costed: estimated at the band’s rate', () => {
+  const k = '2026-04-01', t = (s) => midnight(k) + s * HALF_HOUR;
+  const cover = { from: '2026-01-01', last: midnight('2026-04-03'), now: midnight('2026-04-03') };
+  const period = { start: k, end: addDays(k, 1) };
+  const iv = (s, kwh, costExc, offPeak) => ({ start: t(s), kwh, costExc, standingExc: 0, offPeak, split: null });
+  // off-peak 5p, peak 30p ex VAT (made-up); night half-hours 0–10 not costed by Octopus
+  const ivs = [iv(0, 3, null, null), iv(1, 3, null, null), iv(20, 1, null, null),
+    iv(30, 1, 30, false), iv(31, 1, 30, false), iv(47, 2, 10, true)];
+  const opts = { offWindowOn: () => iogWin };
+
+  it('a night half-hour takes the day’s off-peak rate, a day one the peak rate', () => {
+    const s = summarise(period, byDay(ivs), cover, null, null, () => 0, opts);
+    expect(s.estimatedKwh).toBeCloseTo(7);
+    expect(s.estimatedSlots).toBe(3);
+    expect(s.uncostedSlots).toBe(0);
+    expect(s.offPeak.kwh).toBeCloseTo(2 + 6);
+    expect(s.offPeak.exc).toBeCloseTo(10 + 6 * 5);
+    expect(s.peak.exc).toBeCloseTo(60 + 30);
+    expect(s.energyExc).toBeCloseTo(10 + 60 + 30 + 30);
+  });
+  it('with no rate to go by, it stays uncosted, as before', () => {
+    const s = summarise(period, byDay([iv(0, 3, null, null)]), cover, null, null, () => 0, opts);
+    expect(s.estimatedSlots).toBe(0);
+    expect(s.uncostedSlots).toBe(1);
+    expect(s.energyExc).toBe(0);
+  });
+  it('a day with no costed half-hours borrows the period’s band rate', () => {
+    const k2 = '2026-04-02', t2 = (s) => midnight(k2) + s * HALF_HOUR;
+    const more = [...ivs, { start: t2(2), kwh: 4, costExc: null, standingExc: 0, offPeak: null, split: null }];
+    const s = summarise({ start: k, end: addDays(k2, 1) }, byDay(more), cover, null, null, () => 0, opts);
+    expect(s.estimatedKwh).toBeCloseTo(11);
+    expect(s.offPeak.exc).toBeCloseTo(10 + 6 * 5 + 4 * 5);
+  });
+});
+
+describe('the bill card’s notes', () => {
+  const base = { missing: 0, uncostedSlots: 0, uncostedKwh: 0, unsplitSlots: 0, split: null, pending: 0, exportMissing: 0, estimatedSlots: 0, estimatedKwh: 0 };
+  it('warns when export readings are missing, as it does for import', () => {
+    const n = cardNotes({ ...base, exportMissing: 120 });
+    expect(n.some((x) => x.cls === 'warn' && /120 export half-hours with no reading.*export credit will look short/.test(x.text))).toBe(true);
+  });
+  it('says how much it estimated', () => {
+    const n = cardNotes({ ...base, estimatedSlots: 9, estimatedKwh: 31.5 });
+    expect(n.some((x) => x.cls === 'warn' && /31\.50 kWh in 9 half-hours Octopus has not costed: estimated at that band’s rate/.test(x.text))).toBe(true);
+  });
+  it('says nothing about export when none is missing', () => {
+    expect(cardNotes(base).some((x) => /export/.test(x.text))).toBe(false);
+  });
+});
+
+describe('an estimate’s band: what Octopus charged at that time of day in the bill', () => {
+  const cover = { from: '2026-01-01', last: midnight('2026-04-10'), now: midnight('2026-04-10') };
+  const at = (k, s, kwh, costExc, offPeak) => ({ start: midnight(k) + s * HALF_HOUR, kwh, costExc, standingExc: 0, offPeak, split: null });
+  // On 1–4 April Octopus charged 05:30 (slot 11, just outside 23:30–05:30) at off-peak: charging ran on.
+  const costed = ['2026-04-01', '2026-04-02', '2026-04-03', '2026-04-04'].flatMap((k) => [at(k, 11, 2, 10, true), at(k, 30, 1, 30, false)]);
+  it('a 05:30 half-hour Octopus mostly charged at off-peak is estimated at off-peak', () => {
+    const ivs = [...costed, at('2026-04-05', 11, 2, null, null)];
+    const s = summarise({ start: '2026-04-01', end: '2026-04-06' }, byDay(ivs), cover, null, null, () => 0, { offWindowOn: () => iogWin });
+    expect(s.estimatedSlots).toBe(1);
+    expect(s.offPeak.exc).toBeCloseTo(4 * 10 + 2 * 5);
+  });
+  it('(guard) with no history at that time, the window decides', () => {
+    const ivs = [...costed, at('2026-04-05', 20, 1, null, null)];
+    const s = summarise({ start: '2026-04-01', end: '2026-04-06' }, byDay(ivs), cover, null, null, () => 0, { offWindowOn: () => iogWin });
+    expect(s.peak.exc).toBeCloseTo(4 * 30 + 30);
   });
 });
