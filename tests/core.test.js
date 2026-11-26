@@ -1022,3 +1022,77 @@ describe('an estimate’s band: what Octopus charged at that time of day in the 
     expect(s.peak.exc).toBeCloseTo(4 * 30 + 30);
   });
 });
+
+import { awaitingCost } from '../src/rates.js';
+import { awaitingText, ARRIVING_DAYS } from '../src/bills.js';
+
+describe('a day whose costs are still arriving', () => {
+  const day = new Map([
+    [0, { kwh: 1.2, costExc: 6 }],          // costed
+    [1, { kwh: 0.8, costExc: null }],       // kWh in, cost not yet
+    [2, { kwh: 0.0001, costExc: null }],    // noise: no kWh to cost
+    [3, { kwh: 2.5, costExc: null }],
+  ]);
+  it('finds the half-hours with kWh but no cost', () => {
+    expect([...awaitingCost(day, [0, 1, 2, 3, 4])]).toEqual([1, 3]);
+    expect(awaitingCost(undefined, [0, 1]).size).toBe(0);
+  });
+  it('says the costs are still arriving within a week of the day', () => {
+    const t = awaitingText('2026-11-25', 2, 3.3, '2026-11-26');
+    expect(t.label).toBe('Costs still arriving');
+    expect(t.note).toMatch(/2 half-hours \(3\.30 kWh\)/);
+    expect(awaitingText('2026-11-19', 1, 1, '2026-11-26').head).toBe('costs still arriving');
+  });
+  it('says an older day was not costed, and is estimated', () => {
+    const t = awaitingText('2026-11-18', 1, 0.8, '2026-11-26');
+    expect(ARRIVING_DAYS).toBe(7);
+    expect(t.label).toBe('Not costed by Octopus');
+    expect(t.note).toMatch(/1 half-hour \(0\.80 kWh\).*estimates/);
+  });
+  it('says nothing when every half-hour is costed', () => {
+    expect(awaitingText('2026-11-25', 0, 0, '2026-11-26')).toBe(null);
+  });
+});
+
+import { dayNote } from '../src/bills.js';
+import { provisionalMonths, PROVISIONAL_DAYS } from '../src/data.js';
+
+describe('provisional days', () => {
+  it('today and the 3 days before it are provisional; the 4th day back is not', () => {
+    expect(PROVISIONAL_DAYS).toBe(3);
+    expect(dayNote('2026-11-26', 0, 0, '2026-11-26').text).toMatch(/^Today so far/);
+    expect(dayNote('2026-11-25', 0, 0, '2026-11-26').head).toBe('provisional');
+    expect(dayNote('2026-11-23', 0, 0, '2026-11-26').head).toBe('provisional');
+    expect(dayNote('2026-11-22', 0, 0, '2026-11-26')).toBe(null);
+  });
+  it('costs still arriving take the place of the provisional note', () => {
+    expect(dayNote('2026-11-25', 2, 3.3, '2026-11-26').head).toBe('costs still arriving');
+    expect(dayNote('2026-11-10', 1, 0.8, '2026-11-26').head).toBe('1 not costed');
+  });
+  it('a refresh asks for the months holding today or a provisional day, if loaded', () => {
+    const loaded = ['2026-12-01', '2026-11-01', '2026-10-01'];
+    expect(provisionalMonths(loaded, '2026-12-15').map((m) => m.start)).toEqual(['2026-12-01']);
+    expect(provisionalMonths(loaded, '2026-12-02').map((m) => m.start)).toEqual(['2026-12-01', '2026-11-01']);
+    expect(provisionalMonths(['2026-11-01'], '2026-12-02').map((m) => m.start)).toEqual(['2026-11-01']);
+  });
+});
+
+describe('refreshing a month', () => {
+  const info = { number: 'A-0000ABC7', import: { mpan: '2600000000001', agreements: [], from: null }, export: null, billing: null };
+  const nov = { start: '2026-11-01', end: '2026-12-01' };
+  const t = midnight('2026-11-25') + 37 * HALF_HOUR;   // 18:30
+  const octoWith = (costExc, offPeak) => ({
+    measurements: async (_a, _m, from) => (from === '2026-11-21' ? [{ start: t, kwh: 2.4, costExc, standingExc: 1, offPeak, split: null }] : []),
+    measurementsBetween: async () => [], publishedRates: async () => [] });
+  it('puts Octopus’s new answer in place of the old, not beside it', async () => {
+    const cache = memoryCache();
+    const d = new AccountData(octoWith(73.8, false), info, cache);   // first answer: peak
+    await d.loadMonth(nov);
+    d.octo = octoWith(12.5, true);                                   // re-priced: off-peak
+    await d.refreshMonth(nov);
+    expect(d.imp.length).toBe(1);
+    expect(d.impDays.get('2026-11-25').get(37)).toMatchObject({ costExc: 12.5, offPeak: true });
+    expect(d.loaded).toEqual(['2026-11-01']);
+    expect((await cache.get(monthKey(info, nov))).imp[0].costExc).toBe(12.5);
+  });
+});
