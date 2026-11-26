@@ -383,6 +383,18 @@ day: the database gone, the remembered token and billing day gone, the key field
     against Octopus's live schema, and an issue opens for anything deprecated or removed. The same
     check runs on a pull request that changes a query.
 - **Branches:** work goes to `dev` (live at `dev.emt-lite.pages.dev`); a release is `dev` → `main`.
+- **Versions and the changelog** (26 Nov 2026; CONTRIBUTING.md "Releasing"). The page updates on a
+  refresh, so a version is not for updating: it says which build a report or a bill came from, and
+  `CHANGELOG.md` says why a figure moved between releases.
+  - CalVer `YYYY.M.PATCH`, as EMT, in `package.json`; the footer shows it, linking to the changelog.
+    The dev preview adds `· dev` and the commit (`scripts/deploy.sh` → `vite.config.js`).
+  - Each release is a signed tag `vVERSION` and a GitHub release with that version's notes, made by
+    `npm run release` (`scripts/release.sh`), which then deploys.
+  - The Changelog workflow holds a page change to a changelog line (or the `no-changelog` label),
+    and a release PR to a bumped version with dated notes (`scripts/changelog.js`).
+  - The versions before the changelog were backfilled from the release PRs: 2026.11.0 is the
+    first public version (#1–#6), then #11, #16, #18, #20 and #22.
+  - No betas: the dev preview serves that purpose.
 - **Licence:** PolyForm Noncommercial, as EMT.
 
 ## 8. Rejected

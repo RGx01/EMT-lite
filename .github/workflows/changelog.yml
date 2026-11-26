@@ -1,0 +1,46 @@
+name: Changelog
+
+# CHANGELOG.md is the users' record of what changed (CONTRIBUTING.md "Releasing").
+# - A pull request to dev that changes the page (src/, index.html, public/) adds a line under
+#   [Unreleased], unless it is labelled no-changelog (a refactor, a test, nothing a user would see).
+# - A release pull request to main bumps the version in package.json, and moves [Unreleased] under
+#   that version with the date (scripts/changelog.js release).
+
+on:
+  pull_request:
+    branches: [dev, main]
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+
+permissions:
+  contents: read
+
+jobs:
+  changelog:
+    name: Changelog
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1   # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1   # v7.1.0
+        with:
+          node-version-file: .nvmrc
+      - name: A change to the page has a changelog line
+        if: github.base_ref == 'dev' && !contains(github.event.pull_request.labels.*.name, 'no-changelog')
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+        run: |
+          changed="$(git diff --name-only "$BASE...$HEAD")"
+          if printf '%s\n' "$changed" | grep -qE '^(src/|index\.html$|public/)' \
+             && ! printf '%s\n' "$changed" | grep -qx 'CHANGELOG.md'; then
+            echo "::error::This changes the page but not CHANGELOG.md. Add a line under [Unreleased], or label the PR no-changelog if users will see no difference."
+            exit 1
+          fi
+      - name: A release bumps the version and dates its notes
+        if: github.base_ref == 'main'
+        env:
+          BASE: ${{ github.event.pull_request.base.sha }}
+        run: |
+          base="$(git show "$BASE:package.json" | node -p 'JSON.parse(require("fs").readFileSync(0, "utf8")).version')"
+          node scripts/changelog.js release "$(node -p 'require("./package.json").version')" "$base"

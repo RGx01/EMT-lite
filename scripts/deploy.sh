@@ -19,5 +19,5 @@ if [ "$(git rev-parse HEAD)" != "$(git rev-parse "origin/$target")" ]; then
 fi
 
 npm test
-npm run build
+EMT_LITE_CHANNEL="$target" EMT_LITE_COMMIT="$(git rev-parse HEAD)" npm run build
 npx wrangler pages deploy dist --project-name emt-lite --branch "$target" --commit-hash "$(git rev-parse HEAD)"

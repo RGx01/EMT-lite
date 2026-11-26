@@ -1178,3 +1178,63 @@ describe('the card’s Agile note', () => {
     expect(cardNotes({ ...base, agileSlots: 0 }).length).toBe(0);
   });
 });
+
+import { readFileSync } from 'node:fs';
+import { sections, problems, unwrap } from '../scripts/changelog.js';
+
+describe('the changelog', () => {
+  const text = readFileSync(new URL('../CHANGELOG.md', import.meta.url), 'utf8');
+  const version = JSON.parse(readFileSync(new URL('../package.json', import.meta.url), 'utf8')).version;
+  it('has a dated section for the version in package.json, straight after Unreleased', () => {
+    expect(problems(text, version)).toEqual([]);
+  });
+  it('dates every released section, newest first', () => {
+    const rel = sections(text).slice(1);
+    expect(rel.every((s) => /^\d{4}\.\d{1,2}\.\d+$/.test(s.version) && s.date)).toBe(true);
+    const n = (v) => v.split('.').map(Number).reduce((a, x) => a * 1000 + x, 0);
+    expect(rel.map((s) => n(s.version))).toEqual(rel.map((s) => n(s.version)).sort((a, b) => b - a));
+  });
+  it('says what is missing for a version not yet released', () => {
+    const t = '# C\n\n## [Unreleased]\n\n- a thing\n\n## [2026.11.5] — 2026-11-26\n\n- b\n\n[2026.11.5]: x\n';
+    expect(problems(t, '2026.11.5')).toEqual([]);
+    expect(problems(t, '2026.11.6')).toEqual(['no section for 2026.11.6', 'no link for [2026.11.6] at the end']);
+    expect(problems(t.replace(' — 2026-11-26', ''), '2026.11.5')).toEqual(['2026.11.5 has no date ("## [2026.11.5] — YYYY-MM-DD")']);
+  });
+  it('joins wrapped lines for a GitHub release, keeping bullets and paragraphs apart', () => {
+    expect(unwrap('Intro that\nwraps.\n\n- **One** that\n  wraps\n- Two')).toBe('Intro that wraps.\n\n- **One** that wraps\n- Two');
+  });
+});
+
+import { releaseProblems } from '../scripts/changelog.js';
+
+describe('a release pull request’s changelog', () => {
+  const ok = '# C\n\n## [Unreleased]\n\n## [2026.11.6] — 2026-11-27\n\n- new\n\n## [2026.11.5] — 2026-11-26\n\n- b\n\n[2026.11.6]: x\n[2026.11.5]: y\n';
+  it('passes with the version bumped, dated, and Unreleased emptied into it', () => {
+    expect(releaseProblems(ok, '2026.11.6', '2026.11.5')).toEqual([]);
+    expect(releaseProblems(ok, '2026.11.6', '2026.10.9')).toEqual([]);
+  });
+  it('fails a version not bumped, or notes left under Unreleased', () => {
+    expect(releaseProblems(ok, '2026.11.6', '2026.11.6')).toEqual(["the version 2026.11.6 is not after main's 2026.11.6: bump it in package.json"]);
+    expect(releaseProblems(ok.replace('## [Unreleased]\n', '## [Unreleased]\n\n- left behind\n'), '2026.11.6', '2026.11.5'))
+      .toEqual(['[Unreleased] still has notes: move them under the new version']);
+  });
+});
+
+import { prepare } from '../scripts/changelog.js';
+
+describe('preparing a release', () => {
+  const t = '# C\n\n## [Unreleased]\n\n- new thing\n\n## [2026.11.5] — 2026-11-26\n\n- b\n\n'
+    + '[Unreleased]: https://github.com/RGx01/EMT-lite/compare/v2026.11.5...dev\n[2026.11.5]: https://github.com/RGx01/EMT-lite/releases/tag/v2026.11.5\n';
+  it('moves Unreleased under the version, dated, and links it', () => {
+    const out = prepare(t, '2026.11.6', '2026-11-27');
+    expect(releaseProblems(out, '2026.11.6', '2026.11.5')).toEqual([]);
+    expect(sections(out).map((x) => [x.version, x.date, x.body])).toEqual([
+      ['Unreleased', null, ''], ['2026.11.6', '2026-11-27', '- new thing'], ['2026.11.5', '2026-11-26', '- b']]);
+    expect(out).toMatch(/^\[Unreleased\]: .*compare\/v2026\.11\.6\.\.\.dev$/m);
+    expect(out).toMatch(/^\[2026\.11\.6\]: .*releases\/tag\/v2026\.11\.6$/m);
+  });
+  it('refuses an empty Unreleased, or a version already there', () => {
+    expect(() => prepare(prepare(t, '2026.11.6', '2026-11-27'), '2026.11.7', '2026-11-28')).toThrow(/no notes/);
+    expect(() => prepare(t, '2026.11.5', '2026-11-27')).toThrow(/already/);
+  });
+});
