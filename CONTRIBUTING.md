@@ -23,7 +23,8 @@ once those are blurred. A security problem goes to a private report instead (see
 
 ## Checks
 
-Every pull request runs:
+Every pull request runs these. Unit tests and build, CSP check and Changelog are required: a pull
+request to `dev` or `main` cannot merge until they pass.
 
 | check | what it proves | locally |
 |---|---|---|

@@ -376,8 +376,8 @@ day: the database gone, the remembered token and billing day gone, the key field
   console error, or a request to a host other than the page and the HA badge's. It also checks that
   a request to another host is blocked.
 - **CI** (`.github/workflows/`, 25 Nov 2026; CONTRIBUTING.md):
-  - Unit tests with a build, and the CSP check, on every pull request. Both are required on `main`
-    and `dev`.
+  - Unit tests with a build, the CSP check and the Changelog check, on every pull request. All three
+    are required on `main` and `dev` (Changelog since 26 Nov 2026).
   - CodeQL.
   - A weekly **Kraken schema check**: every GraphQL document in `src/queries.js` is validated
     against Octopus's live schema, and an issue opens for anything deprecated or removed. The same
