@@ -46,7 +46,7 @@ export function problems(text, version) {
     if (!s.body) out.push(`${version} has no notes`);
     if (all.indexOf(s) !== 1) out.push(`${version} should come straight after [Unreleased]`);
   }
-  if (!new RegExp(`^\\[${version.replace(/\./g, '\\.')}\\]: `, 'm').test(text)) out.push(`no link for [${version}] at the end`);
+  if (!String(text).split('\n').some((l) => l.startsWith(`[${version}]: `))) out.push(`no link for [${version}] at the end`);
   return out;
 }
 
