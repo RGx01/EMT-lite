@@ -11,8 +11,9 @@ can be explained.
 
 ## [Unreleased]
 
-- **EMT's logo is in the header,** in its light or dark form to match the page, and links to EMT on
-  GitHub.
+- **EMT's logo is in the header,** in its light or dark form to match the page.
+- **Click the logo to switch between light and dark,** as in EMT. The page follows your device until
+  you do; the choice is then kept on this device, whether or not you ticked Remember me.
 
 ## [2026.11.6] — 2026-11-26
 
