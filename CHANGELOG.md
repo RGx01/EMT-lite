@@ -11,6 +11,8 @@ can be explained.
 
 ## [Unreleased]
 
+## [2026.11.9] — 2026-11-27
+
 - **The tab icon shows in Safari,** and on an iPhone or iPad's home screen.
 
 ## [2026.11.8] — 2026-11-27
@@ -90,7 +92,8 @@ The first public version.
 - **A heatmap** of net use by the half-hour, with every half-hour Octopus has no reading for hatched.
 - **EMT:** the header and footer say where to get EMT for Home Assistant.
 
-[Unreleased]: https://github.com/RGx01/EMT-lite/compare/v2026.11.8...dev
+[Unreleased]: https://github.com/RGx01/EMT-lite/compare/v2026.11.9...dev
+[2026.11.9]: https://github.com/RGx01/EMT-lite/releases/tag/v2026.11.9
 [2026.11.8]: https://github.com/RGx01/EMT-lite/releases/tag/v2026.11.8
 [2026.11.7]: https://github.com/RGx01/EMT-lite/releases/tag/v2026.11.7
 [2026.11.6]: https://github.com/RGx01/EMT-lite/releases/tag/v2026.11.6
