@@ -55,6 +55,9 @@ the window, carries the same, for narrow screens,
 and a link to this repository's issues, for problems and suggestions.
 EMT's logo is EMT's `logo.png` cropped to its gauge and name (`public/emt-logo.webp`). It is drawn for a
 dark page; on a light one it is inverted with its hue turned back to teal, as EMT's own sidebar shows it.
+**Tab icon:** EMT's own 32px tab icon (its gauge) with the teal turned pink: every pixel of
+saturation ≥ 0.5 takes hue 330°, keeping its saturation, with its value raised 15%; the grey ring
+and dark tile stay. It is inline in `index.html` as a data URI, as EMT's is.
 **Light and dark:** the page follows the device until the logo is clicked, which switches to the
 other, as clicking EMT's logo does (`src/theme.js`). The choice, `light` or `dark`, is kept in
 `localStorage` (`emt_lite_theme`) whether or not *Remember me* is ticked: it says nothing about the
