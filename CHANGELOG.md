@@ -11,6 +11,8 @@ can be explained.
 
 ## [Unreleased]
 
+- **The tab icon shows in Safari,** and on an iPhone or iPad's home screen.
+
 ## [2026.11.8] — 2026-11-27
 
 - **A tab icon:** EMT's gauge, in pink.
