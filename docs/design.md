@@ -57,7 +57,9 @@ EMT's logo is EMT's `logo.png` cropped to its gauge and name (`public/emt-logo.w
 dark page; on a light one it is inverted with its hue turned back to teal, as EMT's own sidebar shows it.
 **Tab icon:** EMT's own 32px tab icon (its gauge) with the teal turned pink: every pixel of
 saturation ≥ 0.5 takes hue 330°, keeping its saturation, with its value raised 15%; the grey ring
-and dark tile stay. It is inline in `index.html` as a data URI, as EMT's is.
+and dark tile stay. It is served as files, `public/favicon.ico` (32px), `favicon.png` (64px) and
+`apple-touch-icon.png` (180px, from EMT's 512px `icon.png`): Safari takes no data-URI icon, and asks
+for `/favicon.ico`, which Cloudflare Pages answers with the page itself when the file is missing.
 **Light and dark:** the page follows the device until the logo is clicked, which switches to the
 other, as clicking EMT's logo does (`src/theme.js`). The choice, `light` or `dark`, is kept in
 `localStorage` (`emt_lite_theme`) whether or not *Remember me* is ticked: it says nothing about the
