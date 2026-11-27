@@ -12,12 +12,12 @@
 
 import { daysBetween, slotsOfDay, parseKey } from './time.js';
 import { slotState } from './bill.js';
+import { isDark as dark } from './theme.js';
 
 const CELL = 16, GAP = 1, LEFT = 34, TOP = 40, TOTAL_W = 120, PAD = 10;
 const MON = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
 const HATCH = { bw: ['#000000', '#ffffff'], green: [null, '#00c853'], red: [null, '#ff1744'] };
 
-const dark = () => window.matchMedia?.('(prefers-color-scheme: dark)').matches;
 const bg = () => (dark() ? '#1a1d27' : '#ffffff');
 const axis = () => (dark() ? '#9aa0b0' : '#555566');
 

@@ -11,6 +11,7 @@ import { vatFor } from './vat.js';
 import { rateLine, solid, sideRateLine, exportRateLine, offWindowOf, awaitingCost } from './rates.js';
 import { daysBetween, slotsOfDay, todayKey, parseKey, addDays } from './time.js';
 import { PROVISIONAL_DAYS, agileOn } from './data.js';
+import { isDark } from './theme.js';
 
 export { PROVISIONAL_DAYS };
 
@@ -509,7 +510,7 @@ export class BillsView {
     const slots = [...slotsOfDay(k)].sort((a, b) => a - b);
     const day = this.data.impDays.get(k);
     const eday = this.data.expDays?.get(k);
-    const dark = window.matchMedia?.('(prefers-color-scheme: dark)').matches;
+    const dark = isDark();
     const grid = dark ? '#2a2d3a' : '#e5e7eb', text = dark ? '#c9ccd6' : '#444';
     const late = awaitingCost(day, slots);
     const iv = (s) => (late.has(s) ? null : day?.get(s));   // a costed half-hour, for the banded bars

@@ -47,7 +47,7 @@ A web page for an Octopus customer **without Home Assistant**. They paste their 
    charts stack each bucket as its own bar, with a solid rate line for the House and one for the
    EV (§5.5).
 
-**Around the page.** The page's own header bar (EMT's logo, linking EMT on GitHub; EMT-Lite, the account, Electric Bills / Electric Heatmap / Gas Heatmap, Sign out)
+**Around the page.** The page's own header bar (EMT's logo, which switches light / dark; EMT-Lite, the account, Electric Bills / Electric Heatmap / Gas Heatmap, Sign out)
 stays at the top on every view; the bills' bar sticks just under it. On a wide screen the header
 bar also says *Got Home Assistant? Try EMT for a richer experience*, linking EMT on GitHub, with
 Home Assistant's own *Add app repository to My* badge linking to its add-repository page for EMT. The footer bar, always in view at the bottom of
@@ -55,6 +55,11 @@ the window, carries the same, for narrow screens,
 and a link to this repository's issues, for problems and suggestions.
 EMT's logo is EMT's `logo.png` cropped to its gauge and name (`public/emt-logo.webp`). It is drawn for a
 dark page; on a light one it is inverted with its hue turned back to teal, as EMT's own sidebar shows it.
+**Light and dark:** the page follows the device until the logo is clicked, which switches to the
+other, as clicking EMT's logo does (`src/theme.js`). The choice, `light` or `dark`, is kept in
+`localStorage` (`emt_lite_theme`) whether or not *Remember me* is ticked: it says nothing about the
+account, so Sign out leaves it. `public/theme.js`, a plain script in the head, applies it before the
+first paint, so a dark choice never flashes light. The charts and heatmap redraw on a switch.
 
 **Not authoritative.** The bills are worked out from Octopus's half-hourly data and may contain
 mistakes; the customer's Octopus statement is what counts. The sign-in page and every bill card say
@@ -135,6 +140,7 @@ commit that was tested here, and Cloudflare needs no access to the repository. T
    and drops the key. Closing the tab forgets everything.
 4. **"Remember me" is an opt-in tickbox** and says what it does: it stores the *refresh token*
    (never the key) in `localStorage`, with a "Forget me" button that clears it and the cache (§6).
+   The only other thing written to the browser is the light / dark choice (§1, "Around the page").
    When the refresh token expires, the user pastes the key again. *Its lifetime is not known yet:
    check it with a real key when built, and state it beside the tickbox.* Rejected: storing the key
    encrypted under a passphrase, which adds a password to forget and more code for little gain.
