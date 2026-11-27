@@ -47,12 +47,14 @@ A web page for an Octopus customer **without Home Assistant**. They paste their 
    charts stack each bucket as its own bar, with a solid rate line for the House and one for the
    EV (§5.5).
 
-**Around the page.** The page's own header bar (EMT-Lite, the account, Electric Bills / Electric Heatmap / Gas Heatmap, Sign out)
+**Around the page.** The page's own header bar (EMT's logo, linking EMT on GitHub; EMT-Lite, the account, Electric Bills / Electric Heatmap / Gas Heatmap, Sign out)
 stays at the top on every view; the bills' bar sticks just under it. On a wide screen the header
 bar also says *Got Home Assistant? Try EMT for a richer experience*, linking EMT on GitHub, with
 Home Assistant's own *Add app repository to My* badge linking to its add-repository page for EMT. The footer bar, always in view at the bottom of
 the window, carries the same, for narrow screens,
 and a link to this repository's issues, for problems and suggestions.
+EMT's logo is EMT's `logo.png` cropped to its gauge and name (`public/emt-logo.webp`). It is drawn for a
+dark page; on a light one it is inverted with its hue turned back to teal, as EMT's own sidebar shows it.
 
 **Not authoritative.** The bills are worked out from Octopus's half-hourly data and may contain
 mistakes; the customer's Octopus statement is what counts. The sign-in page and every bill card say

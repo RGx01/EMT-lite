@@ -11,6 +11,9 @@ can be explained.
 
 ## [Unreleased]
 
+- **EMT's logo is in the header,** in its light or dark form to match the page, and links to EMT on
+  GitHub.
+
 ## [2026.11.6] — 2026-11-26
 
 - **The version is in the footer,** linking to this changelog. Say which version you are on when you
