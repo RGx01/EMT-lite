@@ -26,6 +26,11 @@ main { flex: 1 0 auto; width: 100%; }
 .foot { position: sticky; bottom: 0; z-index: 30; margin-top: 24px; padding: 8px 16px; background: var(--surface); border-top: 1px solid var(--border);
   display: flex; justify-content: center; gap: 4px 20px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
 .top h1 { font-size: 18px; margin: 0; }
+/* EMT's logo (EMT's logo.png cropped to its gauge and name), as EMT shows it: drawn for a dark page, and inverted (hue turned back to its teal)
+   on a light one, as EMT's sidebar does (web/templates/base.html .sidebar-brand). */
+.emt-logo { display: flex; flex: none; }
+.emt-logo img { display: block; height: 48px; width: auto; border-radius: 6px; filter: invert(1) hue-rotate(150deg); }
+@media (prefers-color-scheme: dark) { .emt-logo img { filter: none; } }
 .top nav { display: flex; gap: 4px; margin-left: auto; }
 .top nav[hidden] + #forget { margin-left: auto; }
 .muted { color: var(--muted); }
