@@ -11,6 +11,8 @@ can be explained.
 
 ## [Unreleased]
 
+- **A tab icon:** EMT's gauge, in pink.
+
 ## [2026.11.7] — 2026-11-27
 
 - **EMT's logo is in the header,** in its light or dark form to match the page.
