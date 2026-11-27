@@ -3,10 +3,14 @@
   --accent: #3b6fd8; --warn: #b26a00; --up: #c0392b; --down: #2e9e5b;
   color-scheme: light dark;
 }
+/* Dark: the device's choice, unless EMT's logo picked light; or the logo picked dark (src/theme.js). */
 @media (prefers-color-scheme: dark) {
-  :root { --bg: #12141b; --surface: #1a1d27; --text: #e8eaf0; --muted: #9aa0b0; --border: #2a2d3a;
+  :root:not([data-theme="light"]) { --bg: #12141b; --surface: #1a1d27; --text: #e8eaf0; --muted: #9aa0b0; --border: #2a2d3a;
           --accent: #5b8def; --warn: #e0a020; --up: #e05252; --down: #52c487; }
 }
+:root[data-theme="dark"] { --bg: #12141b; --surface: #1a1d27; --text: #e8eaf0; --muted: #9aa0b0; --border: #2a2d3a;
+  --accent: #5b8def; --warn: #e0a020; --up: #e05252; --down: #52c487; color-scheme: dark; }
+:root[data-theme="light"] { color-scheme: light; }
 * { box-sizing: border-box; }
 [hidden] { display: none !important; }
 body { margin: 0; font: 15px/1.45 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; background: var(--bg); color: var(--text); }
@@ -26,6 +30,13 @@ main { flex: 1 0 auto; width: 100%; }
 .foot { position: sticky; bottom: 0; z-index: 30; margin-top: 24px; padding: 8px 16px; background: var(--surface); border-top: 1px solid var(--border);
   display: flex; justify-content: center; gap: 4px 20px; flex-wrap: wrap; font-size: 13px; color: var(--muted); }
 .top h1 { font-size: 18px; margin: 0; }
+/* EMT's logo (EMT's logo.png cropped to its gauge and name), as EMT shows it: drawn for a dark page,
+   and inverted (hue turned back to its teal) on a light one, as EMT's sidebar does
+   (web/templates/base.html .sidebar-brand). Clicking it switches light / dark, as in EMT. */
+.emt-logo { display: flex; flex: none; padding: 0; border: none; background: none; border-radius: 6px; }
+.emt-logo img { display: block; height: 48px; width: auto; border-radius: 6px; filter: invert(1) hue-rotate(150deg); }
+@media (prefers-color-scheme: dark) { :root:not([data-theme="light"]) .emt-logo img { filter: none; } }
+:root[data-theme="dark"] .emt-logo img { filter: none; }
 .top nav { display: flex; gap: 4px; margin-left: auto; }
 .top nav[hidden] + #forget { margin-left: auto; }
 .muted { color: var(--muted); }

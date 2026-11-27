@@ -1238,3 +1238,39 @@ describe('preparing a release', () => {
     expect(() => prepare(t, '2026.11.5', '2026-11-27')).toThrow(/already/);
   });
 });
+
+import { isDark, toggleTheme } from '../src/theme.js';
+import { vi, afterEach } from 'vitest';
+
+describe('theme: EMT\'s logo switches light / dark', () => {
+  afterEach(() => vi.unstubAllGlobals());
+  const root = (theme) => ({ dataset: theme ? { theme } : {} });
+  const device = (dark) => vi.stubGlobal('matchMedia', () => ({ matches: dark }));
+
+  it('follows the device until a choice is made', () => {
+    device(true); expect(isDark(root())).toBe(true);
+    device(false); expect(isDark(root())).toBe(false);
+  });
+  it('a choice overrides the device', () => {
+    device(true); expect(isDark(root('light'))).toBe(false);
+    device(false); expect(isDark(root('dark'))).toBe(true);
+  });
+  it('a click flips from what is shown, and keeps the choice', () => {
+    const stored = {};
+    vi.stubGlobal('localStorage', { setItem: (k, v) => { stored[k] = v; } });
+    device(true);
+    const r = root();
+    expect(toggleTheme(r)).toBe('light');
+    expect(r.dataset.theme).toBe('light');
+    expect(stored.emt_lite_theme).toBe('light');
+    expect(toggleTheme(r)).toBe('dark');
+    expect(stored.emt_lite_theme).toBe('dark');
+  });
+  it('blocked storage still switches, for the visit', () => {
+    vi.stubGlobal('localStorage', { setItem: () => { throw new Error('blocked'); } });
+    device(false);
+    const r = root();
+    expect(toggleTheme(r)).toBe('dark');
+    expect(r.dataset.theme).toBe('dark');
+  });
+});

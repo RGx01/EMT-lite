@@ -4,6 +4,7 @@ import { DemoOctopus, demoAccountInfo, DEMO_NUMBER } from './demo.js';
 import { deviceCache, deleteDeviceCache } from './cache.js';
 import { BillsView } from './bills.js';
 import { renderHeatmap } from './heatmap.js';
+import { isDark, toggleTheme, onThemeChange } from './theme.js';
 
 // The page's header bar stays at the top; the bills' own bar sticks just below it (--top-h).
 {
@@ -17,7 +18,8 @@ import { renderHeatmap } from './heatmap.js';
 document.getElementById('version').textContent = typeof __EMT_LITE_VERSION__ === 'string' ? __EMT_LITE_VERSION__ : '';
 
 // "Remember me" (design §4.4): Octopus's refresh token, the account number and a billing day the
-// user entered. Never the key. Nothing else is written to the browser.
+// user entered. Never the key. Nothing else is written to the browser, but for the light / dark
+// choice made with EMT's logo (src/theme.js).
 const STORE = 'emt-lite';
 const remembered = () => { try { return JSON.parse(localStorage.getItem(STORE)) || null; } catch { return null; } };
 const remember = (v) => localStorage.setItem(STORE, JSON.stringify(v));
@@ -281,7 +283,16 @@ $('more').addEventListener('click', () => {
   loadMonths(monthsToLoad(monthsWanted));
 });
 for (const b of document.querySelectorAll('#tabs .tab')) b.addEventListener('click', () => setTab(b.dataset.tab));
-window.matchMedia?.('(prefers-color-scheme: dark)').addEventListener?.('change', redraw);
+onThemeChange(redraw);
+
+// EMT's logo switches light / dark, as in EMT (src/theme.js).
+{
+  const b = $('theme');
+  const label = () => { const t = `Switch to ${isDark() ? 'light' : 'dark'} theme`; b.title = t; b.setAttribute('aria-label', t); };
+  b.addEventListener('click', () => { toggleTheme(); label(); });
+  onThemeChange(label);
+  label();
+}
 
 // A remembered device signs in with its refresh token.
 const saved = remembered();

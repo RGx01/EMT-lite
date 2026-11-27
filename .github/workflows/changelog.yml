@@ -5,6 +5,8 @@ name: Changelog
 #   [Unreleased], unless it is labelled no-changelog (a refactor, a test, nothing a user would see).
 # - A release pull request to main bumps the version in package.json, and moves [Unreleased] under
 #   that version with the date (scripts/changelog.js release).
+# A required check on main and dev (CONTRIBUTING.md), so it has no path filter: a skipped required
+# check would block the merge.
 
 on:
   pull_request:

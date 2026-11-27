@@ -11,6 +11,12 @@ can be explained.
 
 ## [Unreleased]
 
+## [2026.11.7] — 2026-11-27
+
+- **EMT's logo is in the header,** in its light or dark form to match the page.
+- **Click the logo to switch between light and dark,** as in EMT. The page follows your device until
+  you do; the choice is then kept on this device, whether or not you ticked Remember me.
+
 ## [2026.11.6] — 2026-11-26
 
 - **The version is in the footer,** linking to this changelog. Say which version you are on when you
@@ -78,7 +84,8 @@ The first public version.
 - **A heatmap** of net use by the half-hour, with every half-hour Octopus has no reading for hatched.
 - **EMT:** the header and footer say where to get EMT for Home Assistant.
 
-[Unreleased]: https://github.com/RGx01/EMT-lite/compare/v2026.11.6...dev
+[Unreleased]: https://github.com/RGx01/EMT-lite/compare/v2026.11.7...dev
+[2026.11.7]: https://github.com/RGx01/EMT-lite/releases/tag/v2026.11.7
 [2026.11.6]: https://github.com/RGx01/EMT-lite/releases/tag/v2026.11.6
 [2026.11.5]: https://github.com/RGx01/EMT-lite/releases/tag/v2026.11.5
 [2026.11.4]: https://github.com/RGx01/EMT-lite/releases/tag/v2026.11.4
