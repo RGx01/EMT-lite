@@ -16,6 +16,8 @@ can be explained.
   not split yet, so the parts add up to the total.
 - With an export meter, each day's figures now show the day's export kWh and credit as their own
   item. The day's total is still the import's: the export is taken off on the bill card.
+- Hovering over a day's chart now shows each bar's cost in pence after its kWh, VAT included, where
+  Octopus has costed the half-hour. Export shows its credit.
 
 ## [2026.11.9] — 2026-11-27
 
