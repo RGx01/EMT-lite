@@ -1313,3 +1313,26 @@ describe('the figures beside a day', () => {
     expect(dayHeadText(none, true)).toMatch(/ · Export 0\.00 kWh £0\.00$/);
   });
 });
+
+import { hoverLabel } from '../src/bills.js';
+
+describe('the day chart hover', () => {
+  // fictional figures
+  it('a costed bar shows its kWh, then its cost in pence', () => {
+    const d = { label: 'EV off-peak', yAxisID: 'kwh', _cost: [null, 24.5] };
+    expect(hoverLabel(d, 1, 3.5)).toBe('EV off-peak: 3.500 kWh (24.50p)');
+  });
+  it('a half-hour without a cost shows its kWh alone', () => {
+    const d = { label: 'Costs still arriving', yAxisID: 'kwh' };
+    expect(hoverLabel(d, 0, 0.8)).toBe('Costs still arriving: 0.800 kWh');
+    expect(hoverLabel({ label: 'Import peak', yAxisID: 'kwh', _cost: [null] }, 0, 0.8)).toBe('Import peak: 0.800 kWh');
+  });
+  it('export is drawn below zero and shown as a credit', () => {
+    const d = { label: 'Export', yAxisID: 'kwh', _cost: [15], _credit: true };
+    expect(hoverLabel(d, 0, -2)).toBe('Export: 2.000 kWh (15.00p credit)');
+  });
+  it('a rate stays p/kWh, and an empty point has no line', () => {
+    expect(hoverLabel({ label: 'Rate p/kWh', yAxisID: 'rate' }, 0, 7.35)).toBe('Rate p/kWh: 7.35');
+    expect(hoverLabel({ label: 'Import peak', yAxisID: 'kwh' }, 0, null)).toBe(null);
+  });
+});

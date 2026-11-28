@@ -24,6 +24,8 @@ A web page for an Octopus customer **without Home Assistant**. They paste their 
    IOG-SMB day, in brackets, what that cost is made of: Octopus's House and EV buckets (kWh and £),
    any half-hours not split yet, and the standing charge. With an export meter, the day's export
    kWh and credit follow as their own item: the import total leaves them out (`dayHeadText`).
+   The hover gives each bar's kWh and, where Octopus has costed the half-hour, its cost in pence
+   with VAT (export: its credit, without VAT) (`hoverLabel`).
 2. **A data heatmap.** EMT's kWh heatmap (`web/templates/heatmap_module.html`): one row per day, one
    square per local half-hour, a month per chart, coloured by **net** kWh (import − export) with
    EMT's colour stops, and the daily net as bars beside it: one grid, as EMT's kWh heatmap.
