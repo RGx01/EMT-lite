@@ -20,6 +20,12 @@ A web page for an Octopus customer **without Home Assistant**. They paste their 
    one-line **bill strip** in it with *↑ Show Bill*; each day's half-hours as a **data table**
    (its own *☰ Data* button, or all at once from the header), with the standing charge and the
    day's total under it; legend and hover keys drawn as a line for a rate, a block for a bar.
+   Beside each day's date, its import kWh and cost (energy and standing charge, VAT added). On an
+   IOG-SMB day, in brackets, what that cost is made of: Octopus's House and EV buckets (kWh and £),
+   any half-hours not split yet, and the standing charge. With an export meter, the day's export
+   kWh and credit follow as their own item: the import total leaves them out (`dayHeadText`).
+   The hover gives each bar's kWh and, where Octopus has costed the half-hour, its cost in pence
+   with VAT (export: its credit, without VAT) (`hoverLabel`).
 2. **A data heatmap.** EMT's kWh heatmap (`web/templates/heatmap_module.html`): one row per day, one
    square per local half-hour, a month per chart, coloured by **net** kWh (import − export) with
    EMT's colour stops, and the daily net as bars beside it: one grid, as EMT's kWh heatmap.

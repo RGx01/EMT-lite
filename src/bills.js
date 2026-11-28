@@ -92,6 +92,38 @@ export function dayNote(dayKey, slots, kwh, today = todayKey()) {
       + ' often land a day or two after the first costs.' };
 }
 
+/** The figures beside a day's date: the import's kWh and cost (energy and standing charge, VAT
+ *  added, as the bill card's "Total incl. VAT"); on an IOG-SMB day, what that is made of:
+ *  Octopus's House and EV buckets, any half-hours not split yet, and the standing charge; and,
+ *  where there is an export meter, its kWh and credit, which the import total leaves out. */
+export function dayHeadText(s, withExport) {
+  const kwh = (v) => `${v.toFixed(2)} kWh`;
+  let text = `${kwh(s.kwh)} · ${pounds(s.bill.incTotal)}`;
+  if (s.split) {
+    const side = (name) => Object.entries(s.split).filter(([key]) => key.startsWith(`${name}:`))
+      .reduce((a, [, e]) => ({ kwh: a.kwh + e.kwh, cost: a.cost + e.cost }), { kwh: 0, cost: 0 });
+    const house = side('home'), ev = side('ev');
+    const rest = { kwh: s.billKwh - house.kwh - ev.kwh, cost: s.energy - house.cost - ev.cost };
+    const bits = [`House ${kwh(house.kwh)} ${pounds(house.cost)}`, `EV ${kwh(ev.kwh)} ${pounds(ev.cost)}`];
+    if (rest.kwh >= 0.005) bits.push(`not split yet ${kwh(rest.kwh)} ${pounds(rest.cost)}`);
+    if (s.standing > 0.004) bits.push(`standing ${pounds(s.standing)}`);
+    text += ` (${bits.join(', ')})`;
+  }
+  if (withExport) text += ` · Export ${kwh(s.exportKwh)} ${s.bill.exportCredit > 0.004 ? '−' : ''}${pounds(s.bill.exportCredit)}`;
+  return text;
+}
+
+/** A day chart's hover line: a rate as p/kWh; a bar as its kWh, then, where Octopus has costed
+ *  the half-hour, what that bar cost in pence (`dataset._cost`: VAT added on import; export is a
+ *  credit, without VAT). */
+export function hoverLabel(dataset, i, y) {
+  if (y == null) return null;
+  if (dataset.yAxisID === 'rate') return `${dataset.label}: ${Math.abs(y).toFixed(2)}`;
+  const cost = dataset._cost?.[i];
+  const p = cost == null ? '' : ` (${Math.abs(cost).toFixed(2)}p${dataset._credit ? ' credit' : ''})`;
+  return `${dataset.label}: ${Math.abs(y).toFixed(3)} kWh${p}`;
+}
+
 const MODES = [['bill', 'Bill'], ['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year']];
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -483,7 +515,7 @@ export class BillsView {
       const head = el('div', 'day-head');
       head.append(
         el('strong', null, `${DOW[new Date(`${k}T12:00:00Z`).getUTCDay()]} ${d} ${MON[m - 1]}`),
-        el('span', 'muted', ` ${s.kwh.toFixed(2)} kWh · ${pounds(s.bill.incTotal)}${s.missing ? ` · ${s.missing} missing` : ''}`
+        el('span', 'muted', ` ${dayHeadText(s, Boolean(this.data.expDays))}${s.missing ? ` · ${s.missing} missing` : ''}`
           + `${dn ? ` · ${dn.head}` : ''}`),
       );
       const holder = el('div', 'day-chart');
@@ -514,8 +546,11 @@ export class BillsView {
     const grid = dark ? '#2a2d3a' : '#e5e7eb', text = dark ? '#c9ccd6' : '#444';
     const late = awaitingCost(day, slots);
     const iv = (s) => (late.has(s) ? null : day?.get(s));   // a costed half-hour, for the banded bars
-    const bar = (label, color, value) => ({ type: 'bar', label, yAxisID: 'kwh', order: 2, stack: 'kwh',
-      backgroundColor: color, data: slots.map(value) });
+    const v = 1 + this.vat(k);
+    // each bar's cost, pence with VAT, for the hover: `cost(slot)` is ex VAT, or null
+    const bar = (label, color, value, cost = null) => ({ type: 'bar', label, yAxisID: 'kwh', order: 2, stack: 'kwh',
+      backgroundColor: color, data: slots.map(value),
+      _cost: cost && slots.map((s) => { const c = cost(s); return c == null ? null : c * v; }) });
     const line = (label, color, rates) => ({ type: 'line', label, yAxisID: 'rate', order: 1, _rate: true,
       data: slots.map((s) => rates.get(s)), stepped: 'middle', borderColor: color, borderWidth: 2,
       pointRadius: 0, spanGaps: true, borderDash: [] });
@@ -524,18 +559,22 @@ export class BillsView {
     if (split) {
       // Octopus's IOG-SMB House/EV split, each bucket a bar; a half-hour not split yet is one bar
       const part = (key) => (s) => { const e = iv(s)?.split?.[key]; return e && e.kwh > 0 ? e.kwh : null; };
+      const partCost = (key) => (s) => { const e = iv(s)?.split?.[key]; return e && e.kwh > 0 ? e.cost : null; };
+      const sp = (key) => [part(key), partCost(key)];
       datasets.push(
-        bar('House off-peak', PALETTE.houseOff, part('home:off')),
-        bar('House peak', PALETTE.housePeak, part('home:peak')),
-        bar('EV off-peak', PALETTE.evOff, part('ev:off')),
-        bar('EV peak', PALETTE.evPeak, part('ev:peak')),
+        bar('House off-peak', PALETTE.houseOff, ...sp('home:off')),
+        bar('House peak', PALETTE.housePeak, ...sp('home:peak')),
+        bar('EV off-peak', PALETTE.evOff, ...sp('ev:off')),
+        bar('EV peak', PALETTE.evPeak, ...sp('ev:peak')),
       );
-      if (slots.some((s) => (iv(s)?.split?.['ev:other']?.kwh || 0) + (iv(s)?.split?.['home:other']?.kwh || 0) > 0)) {
-        datasets.push(bar('Other bucket', PALETTE.other,
-          (s) => ((iv(s)?.split?.['ev:other']?.kwh || 0) + (iv(s)?.split?.['home:other']?.kwh || 0)) || null));
+      const other = (s, f) => (iv(s)?.split?.['ev:other']?.[f] || 0) + (iv(s)?.split?.['home:other']?.[f] || 0);
+      if (slots.some((s) => other(s, 'kwh') > 0)) {
+        datasets.push(bar('Other bucket', PALETTE.other, (s) => other(s, 'kwh') || null,
+          (s) => (other(s, 'kwh') > 0 ? other(s, 'cost') : null)));
       }
       if (slots.some((s) => iv(s) && !iv(s).split)) {
-        datasets.push(bar('Not split yet', PALETTE.unsplit, (s) => (iv(s) && !iv(s).split ? iv(s).kwh : null)));
+        datasets.push(bar('Not split yet', PALETTE.unsplit, (s) => (iv(s) && !iv(s).split ? iv(s).kwh : null),
+          (s) => (iv(s) && !iv(s).split ? iv(s).costExc : null)));
       }
       datasets.push(line('House rate p/kWh', text, sideRateLine(k, day, slots, 'home', this.vat)));
       if (slots.some((s) => (iv(s)?.split?.['ev:off']?.kwh || 0) + (iv(s)?.split?.['ev:peak']?.kwh || 0) > 0)) {
@@ -544,8 +583,10 @@ export class BillsView {
       }
     } else {
       datasets.push(
-        bar('Import off-peak', PALETTE.houseOff, (s) => (iv(s)?.offPeak === true ? iv(s).kwh : null)),
-        bar('Import peak', PALETTE.housePeak, (s) => (iv(s) && iv(s).offPeak !== true ? iv(s).kwh : null)),
+        bar('Import off-peak', PALETTE.houseOff, (s) => (iv(s)?.offPeak === true ? iv(s).kwh : null),
+          (s) => (iv(s)?.offPeak === true ? iv(s).costExc : null)),
+        bar('Import peak', PALETTE.housePeak, (s) => (iv(s) && iv(s).offPeak !== true ? iv(s).kwh : null),
+          (s) => (iv(s) && iv(s).offPeak !== true ? iv(s).costExc : null)),
         line('Rate p/kWh', text, solid(rateLine(k, day, slots, this.data.publishedFor(k), this.vat, offWindowOf(this.data.tariffOn(k))), slots)),
       );
     }
@@ -553,7 +594,10 @@ export class BillsView {
       datasets.push(bar(awaitingText(k, late.size, 0).label, hatch(dark), (s) => (late.has(s) ? day.get(s).kwh : null)));
     }
     if (eday) {
-      datasets.push({ ...bar('Export', PALETTE.export, (s) => (eday.get(s) ? -eday.get(s).kwh : null)), stack: 'kwh' });
+      // export is credited without VAT
+      const credit = (s) => (eday.get(s)?.costExc == null ? null : Math.abs(eday.get(s).costExc));
+      datasets.push({ ...bar('Export', PALETTE.export, (s) => (eday.get(s) ? -eday.get(s).kwh : null)), stack: 'kwh',
+        _cost: slots.map(credit), _credit: true });
       const er = exportRateLine(eday, slots);
       if (slots.some((s) => er.get(s) != null)) datasets.push(line('Export rate p/kWh', dark ? PALETTE.exportRate : '#00684C', er));
     }
@@ -592,8 +636,7 @@ export class BillsView {
               { ...it, pointStyle: keyMark(ch.data.datasets[it.datasetIndex]) })) } },
           tooltip: { usePointStyle: true, boxWidth: KEY_W, boxHeight: KEY_H, callbacks: {
             labelPointStyle: (c) => ({ pointStyle: keyMark(c.dataset), rotation: 0 }),
-            label: (c) => (c.parsed.y == null ? null
-            : `${c.dataset.label}: ${Math.abs(c.parsed.y).toFixed(c.dataset.yAxisID === 'rate' ? 2 : 3)}`) } },
+            label: (c) => hoverLabel(c.dataset, c.dataIndex, c.parsed.y) } },
         },
       },
     });

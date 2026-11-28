@@ -1274,3 +1274,65 @@ describe('theme: EMT\'s logo switches light / dark', () => {
     expect(r.dataset.theme).toBe('dark');
   });
 });
+
+import { dayHeadText } from '../src/bills.js';
+
+describe('the figures beside a day', () => {
+  // A fictional IOG-SMB day after 1 Oct (0% VAT): a split night, a split peak half-hour, and one
+  // half-hour Octopus has costed but not split yet. Three half-hours carry 1p of standing charge
+  // each: a finished day is scaled to 48 of them, 48p.
+  const t = (slot) => midnight('2026-11-10') + slot * HALF_HOUR;
+  const imp = byDay([
+    { start: t(2), kwh: 4, costExc: 28, standingExc: 1, offPeak: true,
+      split: { 'ev:off': { kwh: 3.5, cost: 24 }, 'home:off': { kwh: 0.5, cost: 4 } } },
+    { start: t(20), kwh: 0.4, costExc: 9.8, standingExc: 1, offPeak: false,
+      split: { 'home:peak': { kwh: 0.4, cost: 9.8 } } },
+    { start: t(30), kwh: 0.6, costExc: 14.7, standingExc: 1, offPeak: false, split: null },
+  ]);
+  const cover = { from: '2026-01-01', last: midnight('2026-11-11'), now: midnight('2026-11-12') };
+  const day = { start: '2026-11-10', end: '2026-11-11' };
+  it('an IOG-SMB day shows the House and EV buckets, the half-hours not split yet and the standing charge', () => {
+    const s = summarise(day, imp, cover);
+    const text = dayHeadText(s, false);
+    expect(text).toMatch(/^5\.00 kWh · £1\.0\d \(/);
+    expect(text).toContain('House 0.90 kWh £0.14');        // 4p + 9.8p
+    expect(text).toContain('EV 3.50 kWh £0.24');
+    expect(text).toContain('not split yet 0.60 kWh £0.15'); // 14.7p
+    expect(text).toContain('standing £0.48');
+    expect(text).not.toContain('Export');
+  });
+  it('a day without a split keeps the kWh and cost alone', () => {
+    const plain = byDay([{ start: t(2), kwh: 4, costExc: 28, standingExc: null, offPeak: true, split: null }]);
+    expect(dayHeadText(summarise(day, plain, cover), false)).toBe('4.00 kWh · £0.28');
+  });
+  it('an export meter adds its kWh and credit, which the import total leaves out', () => {
+    const exp = byDay([{ start: t(26), kwh: 2, costExc: 30, standingExc: null, offPeak: false }]);
+    const s = summarise(day, imp, cover, exp, cover);
+    expect(dayHeadText(s, true)).toMatch(/^5\.00 kWh · £1\.0\d .* · Export 2\.00 kWh −£0\.30$/);
+    const none = summarise(day, imp, cover, byDay([]), cover);
+    expect(dayHeadText(none, true)).toMatch(/ · Export 0\.00 kWh £0\.00$/);
+  });
+});
+
+import { hoverLabel } from '../src/bills.js';
+
+describe('the day chart hover', () => {
+  // fictional figures
+  it('a costed bar shows its kWh, then its cost in pence', () => {
+    const d = { label: 'EV off-peak', yAxisID: 'kwh', _cost: [null, 24.5] };
+    expect(hoverLabel(d, 1, 3.5)).toBe('EV off-peak: 3.500 kWh (24.50p)');
+  });
+  it('a half-hour without a cost shows its kWh alone', () => {
+    const d = { label: 'Costs still arriving', yAxisID: 'kwh' };
+    expect(hoverLabel(d, 0, 0.8)).toBe('Costs still arriving: 0.800 kWh');
+    expect(hoverLabel({ label: 'Import peak', yAxisID: 'kwh', _cost: [null] }, 0, 0.8)).toBe('Import peak: 0.800 kWh');
+  });
+  it('export is drawn below zero and shown as a credit', () => {
+    const d = { label: 'Export', yAxisID: 'kwh', _cost: [15], _credit: true };
+    expect(hoverLabel(d, 0, -2)).toBe('Export: 2.000 kWh (15.00p credit)');
+  });
+  it('a rate stays p/kWh, and an empty point has no line', () => {
+    expect(hoverLabel({ label: 'Rate p/kWh', yAxisID: 'rate' }, 0, 7.35)).toBe('Rate p/kWh: 7.35');
+    expect(hoverLabel({ label: 'Import peak', yAxisID: 'kwh' }, 0, null)).toBe(null);
+  });
+});
