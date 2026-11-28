@@ -11,6 +11,8 @@ can be explained.
 
 ## [Unreleased]
 
+## [2026.11.10] — 2026-11-28
+
 - On an Intelligent Octopus Go smart-meter-breakdown tariff, each day's figures now show the House and
   EV kWh and cost alongside the day's total, with the standing charge and any half-hours Octopus has
   not split yet, so the parts add up to the total.
@@ -100,7 +102,8 @@ The first public version.
 - **A heatmap** of net use by the half-hour, with every half-hour Octopus has no reading for hatched.
 - **EMT:** the header and footer say where to get EMT for Home Assistant.
 
-[Unreleased]: https://github.com/RGx01/EMT-lite/compare/v2026.11.9...dev
+[Unreleased]: https://github.com/RGx01/EMT-lite/compare/v2026.11.10...dev
+[2026.11.10]: https://github.com/RGx01/EMT-lite/releases/tag/v2026.11.10
 [2026.11.9]: https://github.com/RGx01/EMT-lite/releases/tag/v2026.11.9
 [2026.11.8]: https://github.com/RGx01/EMT-lite/releases/tag/v2026.11.8
 [2026.11.7]: https://github.com/RGx01/EMT-lite/releases/tag/v2026.11.7
