@@ -11,6 +11,12 @@ can be explained.
 
 ## [Unreleased]
 
+- On an Intelligent Octopus Go smart-meter-breakdown tariff, each day's figures now show the House and
+  EV kWh and cost alongside the day's total, with the standing charge and any half-hours Octopus has
+  not split yet, so the parts add up to the total.
+- With an export meter, each day's figures now show the day's export kWh and credit as their own
+  item. The day's total is still the import's: the export is taken off on the bill card.
+
 ## [2026.11.9] — 2026-11-27
 
 - **The tab icon shows in Safari,** and on an iPhone or iPad's home screen.

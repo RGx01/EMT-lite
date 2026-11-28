@@ -92,6 +92,27 @@ export function dayNote(dayKey, slots, kwh, today = todayKey()) {
       + ' often land a day or two after the first costs.' };
 }
 
+/** The figures beside a day's date: the import's kWh and cost (energy and standing charge, VAT
+ *  added, as the bill card's "Total incl. VAT"); on an IOG-SMB day, what that is made of:
+ *  Octopus's House and EV buckets, any half-hours not split yet, and the standing charge; and,
+ *  where there is an export meter, its kWh and credit, which the import total leaves out. */
+export function dayHeadText(s, withExport) {
+  const kwh = (v) => `${v.toFixed(2)} kWh`;
+  let text = `${kwh(s.kwh)} · ${pounds(s.bill.incTotal)}`;
+  if (s.split) {
+    const side = (name) => Object.entries(s.split).filter(([key]) => key.startsWith(`${name}:`))
+      .reduce((a, [, e]) => ({ kwh: a.kwh + e.kwh, cost: a.cost + e.cost }), { kwh: 0, cost: 0 });
+    const house = side('home'), ev = side('ev');
+    const rest = { kwh: s.billKwh - house.kwh - ev.kwh, cost: s.energy - house.cost - ev.cost };
+    const bits = [`House ${kwh(house.kwh)} ${pounds(house.cost)}`, `EV ${kwh(ev.kwh)} ${pounds(ev.cost)}`];
+    if (rest.kwh >= 0.005) bits.push(`not split yet ${kwh(rest.kwh)} ${pounds(rest.cost)}`);
+    if (s.standing > 0.004) bits.push(`standing ${pounds(s.standing)}`);
+    text += ` (${bits.join(', ')})`;
+  }
+  if (withExport) text += ` · Export ${kwh(s.exportKwh)} ${s.bill.exportCredit > 0.004 ? '−' : ''}${pounds(s.bill.exportCredit)}`;
+  return text;
+}
+
 const MODES = [['bill', 'Bill'], ['month', 'Month'], ['quarter', 'Quarter'], ['year', 'Year']];
 const DOW = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
 const MON = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
@@ -483,7 +504,7 @@ export class BillsView {
       const head = el('div', 'day-head');
       head.append(
         el('strong', null, `${DOW[new Date(`${k}T12:00:00Z`).getUTCDay()]} ${d} ${MON[m - 1]}`),
-        el('span', 'muted', ` ${s.kwh.toFixed(2)} kWh · ${pounds(s.bill.incTotal)}${s.missing ? ` · ${s.missing} missing` : ''}`
+        el('span', 'muted', ` ${dayHeadText(s, Boolean(this.data.expDays))}${s.missing ? ` · ${s.missing} missing` : ''}`
           + `${dn ? ` · ${dn.head}` : ''}`),
       );
       const holder = el('div', 'day-chart');
